@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import {
   RoomAudioRenderer,
   useAgent,
@@ -27,20 +27,26 @@ function CallUI({ onDisconnect }: { onDisconnect: () => void }) {
 
   const stateColors: Record<string, string> = {
     connecting: "text-amber-400",
+    "pre-connect-buffering": "text-amber-400",
     initializing: "text-amber-400",
+    idle: "text-gray-400",
     listening: "text-emerald-400",
     thinking: "text-indigo-400",
     speaking: "text-indigo-300",
     disconnected: "text-gray-500",
+    failed: "text-red-400",
   };
 
   const stateLabels: Record<string, string> = {
     connecting: "Connecting...",
+    "pre-connect-buffering": "Preparing...",
     initializing: "Initializing...",
+    idle: "Ready",
     listening: "Listening",
     thinking: "Thinking...",
     speaking: "Speaking",
     disconnected: "Disconnected",
+    failed: "Connection failed",
   };
 
   return (
@@ -144,6 +150,39 @@ function WaitingRoom({ onStart, loading }: { onStart: () => void; loading: boole
   );
 }
 
+/**
+ * Active call view — wraps children inside a live SessionProvider.
+ * The session is started via useSession + TokenSource and passed as a prop.
+ */
+function ActiveCall({ token, livekitUrl, onDisconnect }: {
+  token: string;
+  livekitUrl: string;
+  onDisconnect: () => void;
+}) {
+  // useMemo so the TokenSourceLiteral object is stable across renders
+  // useSession needs the object itself, NOT a function
+  const tokenSource = useMemo(
+    () => TokenSource.literal({ serverUrl: livekitUrl, participantToken: token }),
+    [token, livekitUrl]
+  );
+  const session = useSession(tokenSource);
+
+  useEffect(() => {
+    session.start();
+    return () => {
+      session.end();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  return (
+    <SessionProvider session={session}>
+      <CallUI onDisconnect={onDisconnect} />
+      <RoomAudioRenderer />
+    </SessionProvider>
+  );
+}
+
 export default function PublicCallPage({ params }: { params: Promise<{ slug: string }> }) {
   const [connected, setConnected] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -153,10 +192,15 @@ export default function PublicCallPage({ params }: { params: Promise<{ slug: str
   async function handleStart() {
     setLoading(true);
     try {
-      // In production: POST /api/public/c/[slug]/session
-      // For now we show a demo flow
+      // In production: POST /api/v1/public/c/[slug]/session
+      // Demo flow: simulate loading then show connected UI
       await new Promise((r) => setTimeout(r, 1000));
-      // Demo: would set token + livekitUrl from API response
+      // For demo: would get token + livekitUrl from API response
+      // setToken(response.token);
+      // setLivekitUrl(response.livekit_url);
+      // setConnected(true);
+
+      // For now, just show a "demo" state without real LiveKit connection
       setConnected(true);
     } catch {
       // Handle error
@@ -168,6 +212,7 @@ export default function PublicCallPage({ params }: { params: Promise<{ slug: str
   function handleDisconnect() {
     setConnected(false);
     setToken(null);
+    setLivekitUrl(null);
   }
 
   return (
@@ -190,10 +235,31 @@ export default function PublicCallPage({ params }: { params: Promise<{ slug: str
       <main className="flex flex-1 items-center justify-center p-6">
         <div className="w-full max-w-sm">
           {connected && token && livekitUrl ? (
-            <SessionProvider>
-              <CallUI onDisconnect={handleDisconnect} />
-              <RoomAudioRenderer />
-            </SessionProvider>
+            <ActiveCall
+              token={token}
+              livekitUrl={livekitUrl}
+              onDisconnect={handleDisconnect}
+            />
+          ) : connected ? (
+            /* Demo state: connected but no real LiveKit session */
+            <div className="flex flex-col items-center gap-6 text-white">
+              <div className="relative flex h-40 w-40 items-center justify-center">
+                <div className="absolute inset-0 rounded-full border-2 border-indigo-500 opacity-30" />
+                <div className="absolute inset-2 rounded-full bg-gray-800 flex items-center justify-center">
+                  <Bot className="h-14 w-14 text-indigo-400" />
+                </div>
+              </div>
+              <p className="text-emerald-400 font-semibold">Connected (Demo)</p>
+              <p className="text-gray-500 text-sm text-center">
+                Connect your API keys to enable real voice calls.
+              </p>
+              <button
+                onClick={handleDisconnect}
+                className="flex h-14 w-14 items-center justify-center rounded-full bg-red-600 hover:bg-red-700 transition-colors"
+              >
+                <PhoneOff className="h-6 w-6" />
+              </button>
+            </div>
           ) : (
             <WaitingRoom onStart={handleStart} loading={loading} />
           )}

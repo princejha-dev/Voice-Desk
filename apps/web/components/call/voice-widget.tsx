@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useMemo } from "react";
 import {
   ControlBar,
   RoomAudioRenderer,
@@ -34,9 +34,11 @@ export function VoiceWidget({
   compact = false,
   className,
 }: VoiceWidgetProps) {
-  const tokenSource = useCallback(() => {
-    return TokenSource.fromString(token, livekitUrl);
-  }, [token, livekitUrl]);
+  // useMemo so the TokenSourceLiteral is stable — useSession wants the object, not a fn
+  const tokenSource = useMemo(
+    () => TokenSource.literal({ serverUrl: livekitUrl, participantToken: token }),
+    [token, livekitUrl]
+  );
 
   const session = useSession(tokenSource);
 

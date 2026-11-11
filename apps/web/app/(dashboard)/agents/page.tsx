@@ -5,79 +5,36 @@ import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { AgentCard } from "@/components/agents/agent-card";
-import { Badge } from "@/components/ui/badge";
-import { Plus, Search, Filter, LayoutGrid, List } from "lucide-react";
+import { Skeleton } from "@/components/ui/skeleton";
+import { Plus, Search, Filter, LayoutGrid, List, Bot } from "lucide-react";
+import { useAgents } from "@/hooks/use-api";
 import type { Agent } from "@/lib/types";
-
-// Demo data
-const demoAgents: Agent[] = [
-  {
-    id: "agent-1",
-    tenant_id: "org-1",
-    name: "Sarah — Customer Support",
-    description: "Handles customer inquiries using the company knowledge base. Escalates complex issues.",
-    template: "customer_support",
-    status: "published",
-    active_version_id: "v-1",
-    settings: {},
-    created_at: "2026-10-15T10:00:00Z",
-    updated_at: "2026-11-10T14:30:00Z",
-    call_count: 842,
-    active_version: {
-      id: "v-1",
-      tenant_id: "org-1",
-      agent_id: "agent-1",
-      version: 3,
-      config: {} as any,
-      published_at: "2026-11-10T14:30:00Z",
-      created_by: null,
-      created_at: "2026-11-10T14:30:00Z",
-    },
-  },
-  {
-    id: "agent-2",
-    tenant_id: "org-1",
-    name: "Alex — Appointment Booking",
-    description: "Schedules and manages appointments. Checks availability and sends confirmations.",
-    template: "appointment_booking",
-    status: "published",
-    active_version_id: "v-2",
-    settings: {},
-    created_at: "2026-10-20T08:00:00Z",
-    updated_at: "2026-11-08T09:15:00Z",
-    call_count: 312,
-    active_version: {
-      id: "v-2",
-      tenant_id: "org-1",
-      agent_id: "agent-2",
-      version: 2,
-      config: {} as any,
-      published_at: "2026-11-08T09:15:00Z",
-      created_by: null,
-      created_at: "2026-11-08T09:15:00Z",
-    },
-  },
-  {
-    id: "agent-3",
-    tenant_id: "org-1",
-    name: "Maya — Sales Assistant",
-    description: "Qualifies leads and captures contact information from inbound calls.",
-    template: "sales_assistant",
-    status: "draft",
-    active_version_id: null,
-    settings: {},
-    created_at: "2026-11-05T11:00:00Z",
-    updated_at: "2026-11-05T11:00:00Z",
-    call_count: 0,
-  },
-];
 
 export default function AgentsPage() {
   const [search, setSearch] = useState("");
   const [view, setView] = useState<"grid" | "list">("grid");
+  const { agents: rawAgents, loading, error, refetch } = useAgents();
 
-  const filtered = demoAgents.filter((a) =>
-    a.name.toLowerCase().includes(search.toLowerCase())
+  // Map API data to Agent type
+  const agents: Agent[] = rawAgents.map((a) => ({
+    id: a.id as string,
+    tenant_id: a.tenant_id as string,
+    name: a.name as string,
+    description: (a.description as string) ?? "",
+    template: (a.template as string) ?? "custom",
+    status: (a.status as "draft" | "published" | "archived") ?? "draft",
+    active_version_id: (a.active_version_id as string) ?? null,
+    settings: (a.settings as Record<string, unknown>) ?? {},
+    created_at: a.created_at as string,
+    updated_at: a.updated_at as string,
+    call_count: (a.call_count as number) ?? 0,
+    slug: a.slug as string | undefined,
+    avatar_url: a.avatar_url as string | undefined,
+  }));
+
+  const filtered = agents.filter((a) =>
+    a.name.toLowerCase().includes(search.toLowerCase()) ||
+    (a.description ?? "").toLowerCase().includes(search.toLowerCase())
   );
 
   return (
@@ -90,7 +47,7 @@ export default function AgentsPage() {
             Create and manage your voice AI agents
           </p>
         </div>
-        <Link href="/dashboard/agents/new">
+        <Link href="/agents/new">
           <Button className="gap-2">
             <Plus className="h-4 w-4" />
             Create Agent
@@ -133,25 +90,62 @@ export default function AgentsPage() {
         </div>
       </div>
 
-      {/* Agent grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-        {filtered.map((agent) => (
-          <AgentCard key={agent.id} agent={agent} />
-        ))}
-      </div>
+      {/* Loading state */}
+      {loading && (
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+          {Array.from({ length: 3 }).map((_, i) => (
+            <Skeleton key={i} className="h-48 rounded-xl" />
+          ))}
+        </div>
+      )}
 
-      {filtered.length === 0 && (
+      {/* Error state */}
+      {error && !loading && (
         <div className="text-center py-16">
-          <p className="text-muted-foreground">No agents found</p>
-          <Link href="/dashboard/agents/new">
-            <Button variant="outline" className="mt-4 gap-2">
-              <Plus className="h-4 w-4" />
-              Create your first agent
-            </Button>
-          </Link>
+          <p className="text-muted-foreground text-sm">{error}</p>
+          <Button variant="outline" className="mt-4" onClick={refetch}>
+            Retry
+          </Button>
+        </div>
+      )}
+
+      {/* Agent grid */}
+      {!loading && !error && (
+        <div className={
+          view === "grid"
+            ? "grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4"
+            : "flex flex-col gap-3"
+        }>
+          {filtered.map((agent) => (
+            <AgentCard key={agent.id} agent={agent} />
+          ))}
+        </div>
+      )}
+
+      {/* Empty state */}
+      {!loading && !error && filtered.length === 0 && (
+        <div className="text-center py-16">
+          <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-indigo-50 mx-auto mb-4">
+            <Bot className="h-8 w-8 text-indigo-500" />
+          </div>
+          {search ? (
+            <p className="text-muted-foreground">No agents match &ldquo;{search}&rdquo;</p>
+          ) : (
+            <>
+              <p className="font-medium mb-1">No agents yet</p>
+              <p className="text-muted-foreground text-sm mb-4">
+                Create your first voice AI agent to get started
+              </p>
+              <Link href="/agents/new">
+                <Button className="gap-2">
+                  <Plus className="h-4 w-4" />
+                  Create your first agent
+                </Button>
+              </Link>
+            </>
+          )}
         </div>
       )}
     </div>
   );
 }
-

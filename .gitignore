@@ -121,11 +121,9 @@ coverage/
 *.tmp
 *.temp
 archive/
-main.py
 README.md
 docs/
 supabase/
 .env.example
-requirements.txt
 agent/
-apps/api
+

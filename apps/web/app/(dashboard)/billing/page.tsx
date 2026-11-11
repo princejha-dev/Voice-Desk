@@ -76,9 +76,9 @@ export default function BillingPage() {
       {/* Usage stats */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
         <StatsCard title="Calls This Month" value={1154} change={12} changeLabel="vs last month" icon={Phone} iconColor="text-indigo-600" />
-        <StatsCard title="Minutes Used" value={193} icon={Clock} iconColor="text-violet-600" />
+        <StatsCard title="Minutes Used" value={193} subtitle="this month" icon={Clock} iconColor="text-violet-600" />
         <StatsCard title="Est. Cost" value="$42.80" change={-5} changeLabel="vs last month" icon={DollarSign} iconColor="text-emerald-600" />
-        <StatsCard title="Cost per Minute" value="$0.08" icon={TrendingUp} iconColor="text-amber-600" />
+        <StatsCard title="Cost per Minute" value="$0.08" subtitle="avg. per minute" icon={TrendingUp} iconColor="text-amber-600" />
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">

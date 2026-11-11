@@ -5,8 +5,13 @@ import { ArrowUpRight, ArrowDownRight, type LucideIcon } from "lucide-react";
 interface StatsCardProps {
   title: string;
   value: string | number;
+  /** Numeric percentage change — renders an up/down arrow */
   change?: number;
   changeLabel?: string;
+  /** Plain text shown below the value instead of a numeric change */
+  subtitle?: string;
+  /** Direction override for subtitle coloring */
+  changeType?: "positive" | "negative" | "neutral";
   icon: LucideIcon;
   iconColor?: string;
   className?: string;
@@ -17,6 +22,8 @@ export function StatsCard({
   value,
   change,
   changeLabel,
+  subtitle,
+  changeType = "neutral",
   icon: Icon,
   iconColor = "text-primary",
   className,
@@ -30,6 +37,7 @@ export function StatsCard({
           <div className="space-y-2">
             <p className="text-sm font-medium text-muted-foreground">{title}</p>
             <p className="text-2xl font-bold tracking-tight">{value}</p>
+            {/* Numeric change */}
             {change !== undefined && (
               <div className="flex items-center gap-1">
                 {isPositive ? (
@@ -51,6 +59,21 @@ export function StatsCard({
                 )}
               </div>
             )}
+            {/* Plain subtitle */}
+            {subtitle && change === undefined && (
+              <p
+                className={cn(
+                  "text-xs",
+                  changeType === "positive"
+                    ? "text-emerald-600"
+                    : changeType === "negative"
+                    ? "text-red-500"
+                    : "text-muted-foreground"
+                )}
+              >
+                {subtitle}
+              </p>
+            )}
           </div>
           <div className={cn("rounded-xl p-2.5 bg-muted/50", iconColor)}>
             <Icon className="h-5 w-5" />
@@ -60,4 +83,3 @@ export function StatsCard({
     </Card>
   );
 }
-

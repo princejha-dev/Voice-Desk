@@ -1,18 +1,19 @@
 "use client";
 
+import { useState, useEffect, useRef } from "react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { StatsCard } from "@/components/dashboard/stats-card";
 import { CallChart } from "@/components/dashboard/call-chart";
+import { Skeleton } from "@/components/ui/skeleton";
+import { useMonitoringOverview } from "@/hooks/use-api";
 import {
   Activity,
-  Clock,
   Zap,
   AlertTriangle,
   CheckCircle2,
   Bot,
   Phone,
-  Cpu,
   Gauge,
   Wrench,
   MessageSquare,
@@ -28,7 +29,16 @@ const latencyData = [
   { date: "Sun", calls: 830 },
 ];
 
-const liveEvents = [
+type LiveEvent = {
+  time: string;
+  type: string;
+  agent: string;
+  detail: string;
+  icon: React.ElementType;
+  color: string;
+};
+
+const seedEvents: LiveEvent[] = [
   { time: "16:09:32", type: "message", agent: "Sarah", detail: "Customer asked about refund policy", icon: MessageSquare, color: "text-blue-500" },
   { time: "16:09:30", type: "tool", agent: "Sarah", detail: "knowledge_search executed — 3 sources found (180ms)", icon: Wrench, color: "text-amber-500" },
   { time: "16:09:28", type: "latency", agent: "Sarah", detail: "LLM response latency: 2.4s (above threshold)", icon: AlertTriangle, color: "text-red-500" },
@@ -37,34 +47,66 @@ const liveEvents = [
   { time: "16:07:12", type: "session", agent: "Sarah", detail: "Session completed — resolved in 3:24", icon: CheckCircle2, color: "text-emerald-500" },
 ];
 
-const agentMetrics = [
-  {
-    name: "Sarah — Support",
-    status: "active",
-    activeSessions: 2,
-    avgLatency: "820ms",
-    successRate: "94.2%",
-    callsToday: 47,
-  },
-  {
-    name: "Alex — Booking",
-    status: "active",
-    activeSessions: 1,
-    avgLatency: "650ms",
-    successRate: "97.1%",
-    callsToday: 18,
-  },
-  {
-    name: "Maya — Sales",
-    status: "inactive",
-    activeSessions: 0,
-    avgLatency: "—",
-    successRate: "—",
-    callsToday: 0,
-  },
-];
-
 export default function MonitoringPage() {
+  const { overview, loading } = useMonitoringOverview();
+  const [liveEvents, setLiveEvents] = useState<LiveEvent[]>(seedEvents);
+  const wsRef = useRef<WebSocket | null>(null);
+
+  // Try to connect to live WS feed; fall back gracefully
+  useEffect(() => {
+    const apiBase = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
+    const wsUrl = apiBase.replace(/^http/, "ws") + "/api/v1/monitoring/live";
+    try {
+      const ws = new WebSocket(wsUrl);
+      wsRef.current = ws;
+      ws.onmessage = (ev) => {
+        try {
+          const data = JSON.parse(ev.data as string) as {
+            agent?: string;
+            type?: string;
+            detail?: string;
+          };
+          const now = new Date().toTimeString().slice(0, 8);
+          setLiveEvents((prev) => [
+            {
+              time: now,
+              type: data.type ?? "event",
+              agent: data.agent ?? "Agent",
+              detail: data.detail ?? JSON.stringify(data),
+              icon: Activity,
+              color: "text-indigo-500",
+            },
+            ...prev.slice(0, 19),
+          ]);
+        } catch {
+          // ignore parse errors
+        }
+      };
+    } catch {
+      // WS unavailable — use seed events only
+    }
+    return () => {
+      wsRef.current?.close();
+    };
+  }, []);
+
+  const activeSessions = (overview?.active_calls as number) ?? 3;
+  const avgLatency = (overview?.avg_latency_ms as number) ?? 820;
+  const successRate = (overview?.success_rate_percent as number) ?? 95.1;
+  const errorsToday = (overview?.errors_today as number) ?? 2;
+
+  const agentMetrics = (overview?.agents as Array<{
+    name: string;
+    status: string;
+    active_sessions: number;
+    avg_latency_ms: number;
+    success_rate: number;
+    calls_today: number;
+  }>) ?? [
+    { name: "Sarah — Support", status: "active", active_sessions: 2, avg_latency_ms: 820, success_rate: 94.2, calls_today: 47 },
+    { name: "Alex — Booking", status: "active", active_sessions: 1, avg_latency_ms: 650, success_rate: 97.1, calls_today: 18 },
+  ];
+
   return (
     <div className="space-y-6">
       <div>
@@ -76,10 +118,16 @@ export default function MonitoringPage() {
 
       {/* Live KPIs */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-        <StatsCard title="Active Sessions" value={3} icon={Activity} iconColor="text-emerald-600" />
-        <StatsCard title="Avg. Response Latency" value="820ms" icon={Gauge} iconColor="text-indigo-600" />
-        <StatsCard title="Success Rate (Today)" value="95.1%" icon={CheckCircle2} iconColor="text-emerald-600" />
-        <StatsCard title="Errors (Today)" value={2} icon={AlertTriangle} iconColor="text-red-500" />
+        {loading ? (
+          Array.from({ length: 4 }).map((_, i) => <Skeleton key={i} className="h-28 rounded-xl" />)
+        ) : (
+          <>
+            <StatsCard title="Active Sessions" value={activeSessions} icon={Activity} iconColor="text-emerald-600" />
+            <StatsCard title="Avg. Response Latency" value={`${avgLatency}ms`} icon={Gauge} iconColor="text-indigo-600" />
+            <StatsCard title="Success Rate (Today)" value={`${successRate.toFixed(1)}%`} icon={CheckCircle2} iconColor="text-emerald-600" />
+            <StatsCard title="Errors (Today)" value={errorsToday} icon={AlertTriangle} iconColor="text-red-500" />
+          </>
+        )}
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -109,15 +157,15 @@ export default function MonitoringPage() {
                   <div className="grid grid-cols-3 gap-2 text-center">
                     <div>
                       <p className="text-xs text-muted-foreground">Latency</p>
-                      <p className="text-sm font-semibold">{agent.avgLatency}</p>
+                      <p className="text-sm font-semibold">{agent.avg_latency_ms}ms</p>
                     </div>
                     <div>
                       <p className="text-xs text-muted-foreground">Success</p>
-                      <p className="text-sm font-semibold">{agent.successRate}</p>
+                      <p className="text-sm font-semibold">{agent.success_rate.toFixed(1)}%</p>
                     </div>
                     <div>
                       <p className="text-xs text-muted-foreground">Today</p>
-                      <p className="text-sm font-semibold">{agent.callsToday}</p>
+                      <p className="text-sm font-semibold">{agent.calls_today}</p>
                     </div>
                   </div>
                 )}
@@ -160,4 +208,3 @@ export default function MonitoringPage() {
     </div>
   );
 }
-
