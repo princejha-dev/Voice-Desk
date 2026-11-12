@@ -34,6 +34,9 @@ env_path = Path(__file__).parent / ".env"
 load_dotenv(dotenv_path=env_path)
 load_dotenv()  # fallback to root .env if present
 
+# Pre-register LiveKit plugins on the main thread
+from livekit.plugins import deepgram, cartesia, openai as lk_openai
+
 from livekit.agents import (
     Agent,
     AgentSession,
@@ -144,30 +147,29 @@ async def entrypoint(ctx: JobContext) -> None:
     )
 
     # ------------------------------------------------------------------ #
-    # 7. Start the AgentSession and wait
+    # 7. Start the AgentSession and register lifecycle cleanup
     # ------------------------------------------------------------------ #
+    async def on_shutdown(*args) -> None:
+        try:
+            await session_manager.end_session(session_id=session_id, tenant_id=tenant_id)
+            await publish_session_event(
+                "session_ended",
+                {"session_id": session_id, "agent_id": agent_id},
+                tenant_id,
+            )
+            logger.info("Session %s ended and telemetry published", session_id)
+        except Exception:
+            logger.exception("Error during session shutdown for %s", session_id)
+
+    ctx.add_shutdown_callback(on_shutdown)
+
     session = AgentSession()
-    try:
-        await session.start(agent=agent, room=ctx.room)
-        logger.info("AgentSession started for session %s", session_id)
-        await session.wait()
-        logger.info("AgentSession completed for session %s", session_id)
-    except Exception:
-        logger.exception(
-            "AgentSession error for session %s (tenant=%s)", session_id, tenant_id
-        )
-        raise
-    finally:
-        # ------------------------------------------------------------------ #
-        # 8 & 9. Always clean up regardless of how the session ended
-        # ------------------------------------------------------------------ #
-        await session_manager.end_session(session_id=session_id, tenant_id=tenant_id)
-        await publish_session_event(
-            "session_ended",
-            {"session_id": session_id, "agent_id": agent_id},
-            tenant_id,
-        )
-        logger.info("Session %s ended and telemetry published", session_id)
+    await session.start(agent=agent, room=ctx.room)
+    logger.info("AgentSession started for session %s in room %s", session_id, ctx.room.name)
+
+    first_message = config.get("first_message") or config.get("greeting")
+    if first_message:
+        session.say(first_message)
 
 
 if __name__ == "__main__":

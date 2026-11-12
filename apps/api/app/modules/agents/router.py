@@ -140,7 +140,7 @@ async def create_agent(
             "agent_id": agent["id"],
             "version": 1,
             "config": initial_config,
-            "created_by": ctx.user_id,
+            "created_by": ctx.user.id,
         })
         .execute()
         .data[0]
@@ -251,7 +251,7 @@ async def save_version(
             "agent_id": agent_id,
             "version": next_version,
             "config": body.config.model_dump(),
-            "created_by": ctx.user_id,
+            "created_by": ctx.user.id,
         })
         .execute()
         .data[0]

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import timedelta
 import json
 import logging
 from typing import Any
@@ -68,7 +69,7 @@ async def generate_token(
             )
         )
         .with_metadata(json.dumps(metadata) if metadata else "")
-        .with_ttl(ttl_seconds)
+        .with_ttl(timedelta(seconds=ttl_seconds))
     )
     return token.to_jwt()
 

@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import os
 from functools import lru_cache
@@ -62,17 +63,6 @@ def _cached_load(version_id: str, tenant_id: str, agent_id: str) -> dict:
 
 async def load_config(version_id: str, tenant_id: str, agent_id: str) -> dict[str, Any]:
     """
-    Public async interface.  Delegates to the LRU-cached sync loader.
-
-    Args:
-        version_id: UUID of the agent version row.
-        tenant_id:  UUID of the owning tenant.  Used as a security check.
-        agent_id:   UUID of the agent.  Used as a security check.
-
-    Returns:
-        The ``config`` JSONB column as a Python dict.
-
-    Raises:
-        ValueError: If the row is not found or any ID does not match.
+    Public async interface. Delegates to the LRU-cached sync loader via a background thread.
     """
-    return _cached_load(version_id, tenant_id, agent_id)
+    return await asyncio.to_thread(_cached_load, version_id, tenant_id, agent_id)

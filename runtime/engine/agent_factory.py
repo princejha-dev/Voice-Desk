@@ -41,16 +41,21 @@ class DynamicVoiceAgent:
 
         tools = get_tools_for_agent(self.config, self.session_ctx)
 
-        system_prompt: str = self.config.get(
-            "system_prompt",
-            "You are a helpful voice assistant.",
+        system_prompt: str = (
+            self.config.get("system_prompt")
+            or self.config.get("instructions")
+            or "You are a helpful voice assistant."
         )
-        first_message: Optional[str] = self.config.get("first_message")
+        first_message: Optional[str] = (
+            self.config.get("first_message")
+            or self.config.get("greeting")
+        )
 
         # Build the initial chat context with the system prompt
-        initial_ctx = ChatContext().append(
+        initial_ctx = ChatContext()
+        initial_ctx.add_message(
             role="system",
-            text=system_prompt,
+            content=system_prompt,
         )
 
         agent = Agent(

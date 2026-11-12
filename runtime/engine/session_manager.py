@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import os
 from datetime import datetime, timezone
@@ -37,32 +38,36 @@ async def create_session(
     client = _get_supabase()
     now = datetime.now(timezone.utc).isoformat()
 
-    client.table("call_sessions").upsert(
-        {
-            "id": session_id,
-            "tenant_id": tenant_id,
-            "agent_id": agent_id,
-            "version_id": version_id,
-            "room_name": room_name,
-            "status": "active",
-            "started_at": now,
-        },
-        on_conflict="id",
-    ).execute()
+    await asyncio.to_thread(
+        lambda: client.table("call_sessions").upsert(
+            {
+                "id": session_id,
+                "tenant_id": tenant_id,
+                "agent_id": agent_id,
+                "version_id": version_id,
+                "room_name": room_name,
+                "status": "active",
+                "started_at": now,
+            },
+            on_conflict="id",
+        ).execute()
+    )
 
     logger.info("Session %s marked active (tenant=%s)", session_id, tenant_id)
 
 
 async def end_session(session_id: str, tenant_id: str) -> None:
-    """Mark a call_sessions row as ended."""
+    """Mark a call_sessions row as completed."""
     client = _get_supabase()
     now = datetime.now(timezone.utc).isoformat()
 
-    client.table("call_sessions").update(
-        {"status": "ended", "ended_at": now}
-    ).eq("id", session_id).eq("tenant_id", tenant_id).execute()
+    await asyncio.to_thread(
+        lambda: client.table("call_sessions").update(
+            {"status": "completed", "ended_at": now}
+        ).eq("id", session_id).eq("tenant_id", tenant_id).execute()
+    )
 
-    logger.info("Session %s ended (tenant=%s)", session_id, tenant_id)
+    logger.info("Session %s completed (tenant=%s)", session_id, tenant_id)
 
 
 async def save_message(
@@ -86,4 +91,6 @@ async def save_message(
     if latency_ms is not None:
         row["latency_ms"] = latency_ms
 
-    client.table("conversation_messages").insert(row).execute()
+    await asyncio.to_thread(
+        lambda: client.table("conversation_messages").insert(row).execute()
+    )

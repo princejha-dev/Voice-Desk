@@ -55,10 +55,11 @@ async def publish_session_event(
         logger.debug(
             "Published event '%s' to channel '%s'", event_type, channel
         )
-    except Exception:
-        # Telemetry failures must never crash the voice session.
-        logger.exception(
-            "Failed to publish event '%s' for tenant '%s'",
+    except Exception as exc:
+        # Telemetry failures must never crash or spam the voice session when Redis is offline.
+        logger.debug(
+            "Redis telemetry offline (%s), skipping event '%s' for tenant '%s'",
+            exc,
             event_type,
             tenant_id,
         )
