@@ -73,7 +73,7 @@ export default function OverviewPage() {
           </p>
         </div>
         <Button asChild className="bg-indigo-600 hover:bg-indigo-700 text-white gap-2">
-          <Link href="/agents/new">
+          <Link href="/dashboard/agents/new">
             <Plus className="h-4 w-4" />
             New Agent
           </Link>

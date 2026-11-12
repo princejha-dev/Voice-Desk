@@ -39,6 +39,20 @@ export function useOrganization() {
         if (first) {
           setOrg(first);
           setOrgId(first.id as string);
+        } else {
+          // Auto-create initial organization if user doesn't have one
+          api<Record<string, unknown>>("/api/v1/organizations", {
+            method: "POST",
+            body: JSON.stringify({ name: "My Organization" }),
+            token,
+          })
+            .then((created) => {
+              if (created?.id) {
+                setOrg(created);
+                setOrgId(created.id as string);
+              }
+            })
+            .catch(console.error);
         }
       })
       .catch(console.error)

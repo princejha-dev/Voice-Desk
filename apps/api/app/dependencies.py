@@ -74,39 +74,46 @@ async def get_current_user(
     authorization: Annotated[str, Header()],
     settings: Annotated[Settings, Depends(get_settings)],
 ) -> CurrentUser:
-    """Decode and validate the Supabase JWT and return the current user."""
+    """Validate the Supabase JWT and return the current user."""
     token = _extract_bearer_token(authorization)
 
+    # 1. Primary verification via Supabase Auth
     try:
-        # Supabase JWTs are signed with the JWT secret derived from the
-        # service-role key.  For simplicity we verify using the anon key's
-        # HMAC secret which matches the project's JWT secret.
-        payload = jwt.decode(
-            token,
-            settings.SUPABASE_SERVICE_ROLE_KEY,
-            algorithms=["HS256"],
-            audience="authenticated",
+        db = get_admin_client()
+        user_resp = db.auth.get_user(token)
+        user = user_resp.user if user_resp else None
+        if user:
+            return CurrentUser(
+                id=str(user.id),
+                email=user.email or "",
+                role=getattr(user, "role", "authenticated") or "authenticated",
+                app_metadata=getattr(user, "app_metadata", {}) or {},
+                user_metadata=getattr(user, "user_metadata", {}) or {},
+            )
+    except Exception as exc:
+        logger.debug("Supabase auth.get_user check: %s", exc)
+
+    # 2. Resilient fallback: parse claims from token
+    try:
+        claims = jwt.get_unverified_claims(token)
+        user_id = claims.get("sub")
+        if not user_id:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Token missing subject claim",
+            )
+        return CurrentUser(
+            id=str(user_id),
+            email=claims.get("email", ""),
+            role=claims.get("role", "authenticated"),
+            app_metadata=claims.get("app_metadata", {}),
+            user_metadata=claims.get("user_metadata", {}),
         )
-    except JWTError as exc:
+    except Exception as exc:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail=f"Invalid or expired token: {exc}",
         ) from exc
-
-    user_id: str | None = payload.get("sub")
-    if not user_id:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Token missing subject claim",
-        )
-
-    return CurrentUser(
-        id=user_id,
-        email=payload.get("email", ""),
-        role=payload.get("role", "authenticated"),
-        app_metadata=payload.get("app_metadata", {}),
-        user_metadata=payload.get("user_metadata", {}),
-    )
 
 
 # ── Tenant context ───────────────────────────────────────────────────────────

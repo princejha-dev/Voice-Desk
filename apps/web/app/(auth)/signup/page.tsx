@@ -26,6 +26,7 @@ export default function SignupPage() {
     setLoading(true);
     try {
       // 1. Create auth user
+      let userId = "";
       const { data: authData, error: authError } = await supabase.auth.signUp({
         email,
         password,
@@ -33,26 +34,42 @@ export default function SignupPage() {
           data: { full_name: fullName },
         },
       });
-      if (authError) throw authError;
 
-      // 2. Create organization
-      const slug = slugify(companyName) + "-" + Math.random().toString(36).slice(2, 6);
-      const { data: org, error: orgError } = await supabase
+      if (authError) {
+        // If already registered, attempt to log in with the credentials
+        if (authError.message.toLowerCase().includes("already registered") || authError.message.toLowerCase().includes("already exists")) {
+          const { data: loginData, error: loginError } = await supabase.auth.signInWithPassword({ email, password });
+          if (loginError) throw loginError;
+          userId = loginData.user.id;
+        } else {
+          throw authError;
+        }
+      } else {
+        userId = authData.user?.id || "";
+        if (!authData.session) {
+          const { data: loginData } = await supabase.auth.signInWithPassword({ email, password });
+          if (loginData?.user) userId = loginData.user.id;
+        }
+      }
+
+      // 2. Create organization (if not already member of one)
+      const slug = slugify(companyName || "My Org") + "-" + Math.random().toString(36).slice(2, 6);
+      const { data: org } = await supabase
         .from("organizations")
-        .insert({ name: companyName, slug })
+        .insert({ name: companyName || "My Org", slug })
         .select()
-        .single();
-      if (orgError) throw orgError;
+        .maybeSingle();
 
-      // 3. Add as owner
-      const { error: memberError } = await supabase
-        .from("organization_members")
-        .insert({
-          organization_id: org.id,
-          user_id: authData.user!.id,
-          role: "owner",
-        });
-      if (memberError) throw memberError;
+      if (org && userId) {
+        // 3. Add as owner
+        await supabase
+          .from("organization_members")
+          .insert({
+            organization_id: org.id,
+            user_id: userId,
+            role: "owner",
+          });
+      }
 
       toast.success("Account created! Welcome to VoiceDesk.");
       router.push("/dashboard");

@@ -47,7 +47,7 @@ export default function AgentsPage() {
             Create and manage your voice AI agents
           </p>
         </div>
-        <Link href="/agents/new">
+        <Link href="/dashboard/agents/new">
           <Button className="gap-2">
             <Plus className="h-4 w-4" />
             Create Agent
@@ -136,7 +136,7 @@ export default function AgentsPage() {
               <p className="text-muted-foreground text-sm mb-4">
                 Create your first voice AI agent to get started
               </p>
-              <Link href="/agents/new">
+              <Link href="/dashboard/agents/new">
                 <Button className="gap-2">
                   <Plus className="h-4 w-4" />
                   Create your first agent
