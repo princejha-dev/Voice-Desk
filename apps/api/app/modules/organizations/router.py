@@ -84,11 +84,10 @@ async def create_organization(
 
     # Add creator as owner
     db.table("organization_members").insert({
-        "id": str(uuid.uuid4()),
         "organization_id": org_id,
         "user_id": user.id,
         "role": "owner",
-        "joined_at": now,
+        "created_at": now,
     }).execute()
 
     return org
@@ -114,7 +113,7 @@ async def get_organization(
 
     members = (
         db.table("organization_members")
-        .select("user_id, role, joined_at")
+        .select("user_id, role, created_at")
         .eq("organization_id", org_id)
         .execute()
         .data
@@ -172,7 +171,7 @@ async def invite_member(
     # Check if already a member
     existing = (
         db.table("organization_members")
-        .select("id")
+        .select("user_id")
         .eq("organization_id", org_id)
         .eq("user_id", target_user.id)
         .maybe_single()
@@ -189,11 +188,10 @@ async def invite_member(
     member = (
         db.table("organization_members")
         .insert({
-            "id": str(uuid.uuid4()),
             "organization_id": org_id,
             "user_id": target_user.id,
             "role": body.role,
-            "joined_at": now,
+            "created_at": now,
         })
         .execute()
         .data[0]
@@ -213,7 +211,7 @@ async def remove_member(
         db = get_admin_client()
         owners = (
             db.table("organization_members")
-            .select("id")
+            .select("user_id")
             .eq("organization_id", org_id)
             .eq("role", "owner")
             .execute()
