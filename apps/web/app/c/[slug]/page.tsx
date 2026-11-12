@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, use } from "react";
 import {
   RoomAudioRenderer,
   useAgent,
@@ -10,16 +10,9 @@ import {
 } from "@livekit/components-react";
 import "@livekit/components-styles";
 import { TokenSource } from "livekit-client";
-import { Bot, Mic, MicOff, PhoneOff, Phone } from "lucide-react";
+import { Bot, Mic, MicOff, PhoneOff, Phone, Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
-
-// Demo agent info (in production this comes from API based on slug)
-const agentInfo = {
-  name: "Sarah",
-  company: "Acme Clinic",
-  greeting: "Your 24/7 AI assistant is ready to help",
-  accentColor: "#6366F1",
-};
+import { toast } from "sonner";
 
 function CallUI({ onDisconnect }: { onDisconnect: () => void }) {
   const agent = useAgent();
@@ -81,7 +74,7 @@ function CallUI({ onDisconnect }: { onDisconnect: () => void }) {
           {stateLabels[agent.state] || agent.state}
         </p>
         <p className="text-sm text-gray-500">
-          {agent.state === "speaking" ? `${agentInfo.name} is speaking...` : `${agentInfo.name} is ready`}
+          {agent.state === "speaking" ? "Agent is speaking..." : "Listening to you..."}
         </p>
       </div>
 
@@ -111,7 +104,15 @@ function CallUI({ onDisconnect }: { onDisconnect: () => void }) {
   );
 }
 
-function WaitingRoom({ onStart, loading }: { onStart: () => void; loading: boolean }) {
+function WaitingRoom({
+  agent,
+  onStart,
+  loading,
+}: {
+  agent: { name: string; greeting: string };
+  onStart: () => void;
+  loading: boolean;
+}) {
   return (
     <div className="flex flex-col items-center gap-8">
       {/* Agent avatar */}
@@ -121,13 +122,13 @@ function WaitingRoom({ onStart, loading }: { onStart: () => void; loading: boole
       </div>
 
       <div className="text-center space-y-2">
-        <h2 className="text-2xl font-bold text-white">{agentInfo.name}</h2>
-        <p className="text-gray-400">{agentInfo.greeting}</p>
+        <h2 className="text-2xl font-bold text-white">{agent.name}</h2>
+        <p className="text-gray-400 max-w-xs">{agent.greeting}</p>
       </div>
 
       {/* Features */}
       <div className="flex flex-wrap justify-center gap-3">
-        {["Instant answers", "24/7 available", "Knowledge base"].map((tag) => (
+        {["Instant answers", "24/7 available", "Voice AI"].map((tag) => (
           <span key={tag} className="rounded-full bg-gray-800 border border-gray-700 px-3 py-1 text-sm text-gray-300">
             {tag}
           </span>
@@ -140,7 +141,7 @@ function WaitingRoom({ onStart, loading }: { onStart: () => void; loading: boole
         className="flex h-16 w-16 items-center justify-center rounded-full bg-indigo-600 text-white hover:bg-indigo-700 active:scale-95 transition-all shadow-lg shadow-indigo-900/40 disabled:opacity-70"
       >
         {loading ? (
-          <div className="h-6 w-6 animate-spin rounded-full border-2 border-white border-t-transparent" />
+          <Loader2 className="h-6 w-6 animate-spin" />
         ) : (
           <Phone className="h-7 w-7" />
         )}
@@ -150,17 +151,11 @@ function WaitingRoom({ onStart, loading }: { onStart: () => void; loading: boole
   );
 }
 
-/**
- * Active call view — wraps children inside a live SessionProvider.
- * The session is started via useSession + TokenSource and passed as a prop.
- */
 function ActiveCall({ token, livekitUrl, onDisconnect }: {
   token: string;
   livekitUrl: string;
   onDisconnect: () => void;
 }) {
-  // useMemo so the TokenSourceLiteral object is stable across renders
-  // useSession needs the object itself, NOT a function
   const tokenSource = useMemo(
     () => TokenSource.literal({ serverUrl: livekitUrl, participantToken: token }),
     [token, livekitUrl]
@@ -184,26 +179,50 @@ function ActiveCall({ token, livekitUrl, onDisconnect }: {
 }
 
 export default function PublicCallPage({ params }: { params: Promise<{ slug: string }> }) {
+  const { slug } = use(params);
   const [connected, setConnected] = useState(false);
   const [loading, setLoading] = useState(false);
   const [token, setToken] = useState<string | null>(null);
   const [livekitUrl, setLivekitUrl] = useState<string | null>(null);
+  const [agent, setAgent] = useState({
+    name: "Voice Agent",
+    greeting: "Your 24/7 AI assistant is ready to help",
+  });
+
+  const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+
+  useEffect(() => {
+    if (!slug) return;
+    fetch(`${apiUrl}/api/v1/public/c/${slug}`)
+      .then(async (res) => {
+        if (!res.ok) return;
+        const data = await res.json();
+        setAgent({
+          name: data.name || "Voice Agent",
+          greeting: data.greeting || "Your 24/7 AI assistant is ready to help",
+        });
+      })
+      .catch((err) => console.warn("Failed to fetch public agent info", err));
+  }, [slug, apiUrl]);
 
   async function handleStart() {
     setLoading(true);
     try {
-      // In production: POST /api/v1/public/c/[slug]/session
-      // Demo flow: simulate loading then show connected UI
-      await new Promise((r) => setTimeout(r, 1000));
-      // For demo: would get token + livekitUrl from API response
-      // setToken(response.token);
-      // setLivekitUrl(response.livekit_url);
-      // setConnected(true);
-
-      // For now, just show a "demo" state without real LiveKit connection
+      const res = await fetch(`${apiUrl}/api/v1/public/c/${slug}/session`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ participant_name: "Customer" }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ detail: res.statusText }));
+        throw new Error(err.detail || "Failed to start call");
+      }
+      const data = await res.json();
+      setToken(data.token);
+      setLivekitUrl(data.livekit_url);
       setConnected(true);
-    } catch {
-      // Handle error
+    } catch (err: any) {
+      toast.error(err.message || "Failed to connect to agent");
     } finally {
       setLoading(false);
     }
@@ -223,7 +242,7 @@ export default function PublicCallPage({ params }: { params: Promise<{ slug: str
           <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-indigo-600">
             <Bot className="h-4 w-4 text-white" />
           </div>
-          <span className="font-bold text-white">{agentInfo.company}</span>
+          <span className="font-bold text-white">{agent.name}</span>
         </div>
         <span className="text-xs text-gray-500 flex items-center gap-1.5">
           <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
@@ -240,28 +259,8 @@ export default function PublicCallPage({ params }: { params: Promise<{ slug: str
               livekitUrl={livekitUrl}
               onDisconnect={handleDisconnect}
             />
-          ) : connected ? (
-            /* Demo state: connected but no real LiveKit session */
-            <div className="flex flex-col items-center gap-6 text-white">
-              <div className="relative flex h-40 w-40 items-center justify-center">
-                <div className="absolute inset-0 rounded-full border-2 border-indigo-500 opacity-30" />
-                <div className="absolute inset-2 rounded-full bg-gray-800 flex items-center justify-center">
-                  <Bot className="h-14 w-14 text-indigo-400" />
-                </div>
-              </div>
-              <p className="text-emerald-400 font-semibold">Connected (Demo)</p>
-              <p className="text-gray-500 text-sm text-center">
-                Connect your API keys to enable real voice calls.
-              </p>
-              <button
-                onClick={handleDisconnect}
-                className="flex h-14 w-14 items-center justify-center rounded-full bg-red-600 hover:bg-red-700 transition-colors"
-              >
-                <PhoneOff className="h-6 w-6" />
-              </button>
-            </div>
           ) : (
-            <WaitingRoom onStart={handleStart} loading={loading} />
+            <WaitingRoom agent={agent} onStart={handleStart} loading={loading} />
           )}
         </div>
       </main>
@@ -269,7 +268,7 @@ export default function PublicCallPage({ params }: { params: Promise<{ slug: str
       {/* Bottom note */}
       <footer className="py-4 text-center">
         <p className="text-xs text-gray-700">
-          Your conversation is private and not stored by default.
+          Your conversation is private and encrypted.
         </p>
       </footer>
     </div>

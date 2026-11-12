@@ -2,6 +2,8 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { useAuthToken, useOrganization } from "@/hooks/use-api";
+import { api } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -96,10 +98,13 @@ const templateDefaults: Record<string, Partial<typeof defaultConfig>> = {
 
 export default function CreateAgentPage() {
   const router = useRouter();
+  const { orgId } = useOrganization();
+  const token = useAuthToken();
   const [step, setStep] = useState(1);
   const [template, setTemplate] = useState<string | null>(null);
   const [config, setConfig] = useState(defaultConfig);
   const [files, setFiles] = useState<any[]>([]);
+  const [saving, setSaving] = useState(false);
 
   function selectTemplate(id: string) {
     setTemplate(id);
@@ -127,9 +132,88 @@ export default function CreateAgentPage() {
     }, 2000);
   }
 
-  function handleCreate() {
-    toast.success("Agent created successfully!");
-    router.push("/dashboard/agents");
+  async function handleCreate() {
+    if (!orgId || !token) {
+      toast.error("Please sign in and ensure an organization is active.");
+      return;
+    }
+    setSaving(true);
+    try {
+      // 1. Create agent in draft
+      const agentRes = await api<{ agent: { id: string; slug: string; name: string } }>(
+        `/api/v1/organizations/${orgId}/agents`,
+        {
+          method: "POST",
+          body: JSON.stringify({
+            name: config.name,
+            description: config.personality,
+            template: template || "custom",
+          }),
+          token,
+        }
+      );
+      const newAgent = agentRes.agent;
+
+      // 2. Save configured version
+      const versionRes = await api<{ id: string }>(
+        `/api/v1/organizations/${orgId}/agents/${newAgent.id}/versions`,
+        {
+          method: "POST",
+          body: JSON.stringify({
+            config: {
+              instructions: config.instructions,
+              greeting: config.greeting,
+              personality: config.personality,
+              llm: {
+                provider: config.llm_provider,
+                model: config.llm_model,
+                temperature: config.llm_temperature,
+              },
+              stt: {
+                provider: config.stt_provider,
+                model: config.stt_model,
+                language: config.stt_language,
+              },
+              tts: {
+                provider: config.tts_provider,
+                voice_id: "default",
+                voice_name: config.tts_voice,
+              },
+              tools: Object.entries(config.tools)
+                .filter(([_, enabled]) => enabled)
+                .map(([name]) => name),
+              guardrails: {
+                refuse_off_topic: true,
+                require_knowledge_base: config.tools.knowledge_search,
+                offer_human_fallback: config.tools.request_callback,
+              },
+            },
+          }),
+          token,
+        }
+      );
+
+      // 3. Publish this version
+      await api(
+        `/api/v1/organizations/${orgId}/agents/${newAgent.id}/publish`,
+        {
+          method: "POST",
+          body: JSON.stringify({ version_id: versionRes.id }),
+          token,
+        }
+      );
+
+      toast.success("Agent created and published successfully!");
+      if (newAgent.slug) {
+        router.push(`/c/${newAgent.slug}`);
+      } else {
+        router.push("/agents");
+      }
+    } catch (err: any) {
+      toast.error(err.message || "Failed to create agent");
+    } finally {
+      setSaving(false);
+    }
   }
 
   const canNext =
@@ -556,9 +640,9 @@ export default function CreateAgentPage() {
             <ArrowRight className="h-4 w-4" />
           </Button>
         ) : (
-          <Button onClick={handleCreate} className="gap-2 bg-emerald-600 hover:bg-emerald-700">
-            <Check className="h-4 w-4" />
-            Create & Publish Agent
+          <Button onClick={handleCreate} disabled={saving} className="gap-2 bg-emerald-600 hover:bg-emerald-700">
+            {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
+            {saving ? "Publishing Agent..." : "Create & Publish Agent"}
           </Button>
         )}
       </div>

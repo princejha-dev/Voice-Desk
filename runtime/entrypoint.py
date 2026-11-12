@@ -20,8 +20,20 @@ import asyncio
 import json
 import logging
 import os
+import sys
+from pathlib import Path
 
+# Ensure root directory is on sys.path so 'runtime' package can be imported
+ROOT_DIR = Path(__file__).resolve().parent.parent
+if str(ROOT_DIR) not in sys.path:
+    sys.path.insert(0, str(ROOT_DIR))
+
+# Ensure runtime directory's .env is loaded
 from dotenv import load_dotenv
+env_path = Path(__file__).parent / ".env"
+load_dotenv(dotenv_path=env_path)
+load_dotenv()  # fallback to root .env if present
+
 from livekit.agents import (
     Agent,
     AgentSession,
@@ -35,8 +47,6 @@ from runtime.engine.context import SessionContext
 from runtime.engine.agent_factory import DynamicVoiceAgent
 from runtime.engine import session_manager
 from runtime.telemetry.events import publish_session_event
-
-load_dotenv()
 
 logging.basicConfig(
     level=logging.INFO,
@@ -161,4 +171,4 @@ async def entrypoint(ctx: JobContext) -> None:
 
 
 if __name__ == "__main__":
-    cli.run_app(WorkerOptions(entrypoint_fnc=entrypoint))
+    cli.run_app(WorkerOptions(entrypoint_fnc=entrypoint, agent_name="voicedesk-agent"))
