@@ -43,12 +43,14 @@ async def list_knowledge_documents(
     db = get_admin_client()
     docs = (
         db.table("knowledge_documents")
-        .select("id, name, file_path, mime_type, status, chunk_count, created_at, updated_at")
+        .select("id, filename, file_path, mime_type, status, chunk_count, created_at, updated_at")
         .eq("tenant_id", org_id)
         .order("created_at", desc=True)
         .execute()
         .data
     )
+    for d in docs:
+        d["name"] = d.get("filename")
     return {"documents": docs}
 
 
@@ -91,10 +93,10 @@ async def upload_knowledge_document(
         .insert({
             "id": doc_id,
             "tenant_id": org_id,
-            "name": file.filename,
+            "filename": file.filename,
             "file_path": file_path,
             "mime_type": file.content_type,
-            "file_size_bytes": len(file_bytes),
+            "file_size": len(file_bytes),
             "status": "processing",
             "chunk_count": 0,
             "created_at": now,
