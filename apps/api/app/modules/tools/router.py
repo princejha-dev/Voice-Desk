@@ -217,3 +217,189 @@ async def update_tool_config(
     )
     return result[0] if result else {}
 
+
+# ── Tool Operations Data Endpoints ──────────────────────────────────────────────
+
+
+class UpdateBookingStatusRequest(BaseModel):
+    status: str
+    notes: str | None = None
+
+
+class UpdateTicketStatusRequest(BaseModel):
+    status: str
+    priority: str | None = None
+
+
+class UpdateCallbackStatusRequest(BaseModel):
+    status: str
+
+
+@router.get("/{org_id}/tools/bookings")
+async def list_bookings(
+    org_id: str,
+    ctx: Annotated[TenantContext, Depends(get_tenant_context)],
+    agent_id: str | None = None,
+    booking_status: str | None = None,
+    limit: int = 50,
+):
+    """List appointments booked by voice agents for this organization."""
+    db = get_admin_client()
+    query = (
+        db.table("bookings")
+        .select("id, tenant_id, agent_id, session_id, customer_name, customer_phone, customer_email, booking_date, booking_time, duration_minutes, status, notes, created_at, agents(name, slug)")
+        .eq("tenant_id", org_id)
+        .order("booking_date", desc=True)
+        .order("booking_time", desc=True)
+        .limit(limit)
+    )
+    if agent_id:
+        query = query.eq("agent_id", agent_id)
+    if booking_status:
+        query = query.eq("status", booking_status)
+
+    raw_data = query.execute().data or []
+    for row in raw_data:
+        agent_data = row.pop("agents", None) or {}
+        row["agent_name"] = agent_data.get("name") or "Voice Agent"
+        row["agent_slug"] = agent_data.get("slug")
+    return {"bookings": raw_data}
+
+
+@router.patch("/{org_id}/tools/bookings/{booking_id}")
+async def update_booking_status(
+    org_id: str,
+    booking_id: str,
+    body: UpdateBookingStatusRequest,
+    ctx: Annotated[TenantContext, Depends(get_tenant_context)],
+):
+    """Update status of a booked appointment."""
+    db = get_admin_client()
+    update_data: dict = {"status": body.status}
+    if body.notes is not None:
+        update_data["notes"] = body.notes
+
+    result = (
+        db.table("bookings")
+        .update(update_data)
+        .eq("id", booking_id)
+        .eq("tenant_id", org_id)
+        .execute()
+        .data
+    )
+    if not result:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Booking not found")
+    return result[0]
+
+
+@router.get("/{org_id}/tools/tickets")
+async def list_tickets(
+    org_id: str,
+    ctx: Annotated[TenantContext, Depends(get_tenant_context)],
+    agent_id: str | None = None,
+    ticket_status: str | None = None,
+    priority: str | None = None,
+    limit: int = 50,
+):
+    """List support tickets created by voice agents."""
+    db = get_admin_client()
+    query = (
+        db.table("support_tickets")
+        .select("id, tenant_id, agent_id, session_id, customer_name, customer_contact, subject, description, priority, status, created_at, agents(name, slug)")
+        .eq("tenant_id", org_id)
+        .order("created_at", desc=True)
+        .limit(limit)
+    )
+    if agent_id:
+        query = query.eq("agent_id", agent_id)
+    if ticket_status:
+        query = query.eq("status", ticket_status)
+    if priority:
+        query = query.eq("priority", priority)
+
+    raw_data = query.execute().data or []
+    for row in raw_data:
+        agent_data = row.pop("agents", None) or {}
+        row["agent_name"] = agent_data.get("name") or "Voice Agent"
+        row["agent_slug"] = agent_data.get("slug")
+    return {"tickets": raw_data}
+
+
+@router.patch("/{org_id}/tools/tickets/{ticket_id}")
+async def update_ticket_status(
+    org_id: str,
+    ticket_id: str,
+    body: UpdateTicketStatusRequest,
+    ctx: Annotated[TenantContext, Depends(get_tenant_context)],
+):
+    """Update status or priority of a support ticket."""
+    db = get_admin_client()
+    update_data: dict = {"status": body.status}
+    if body.priority is not None:
+        update_data["priority"] = body.priority
+
+    result = (
+        db.table("support_tickets")
+        .update(update_data)
+        .eq("id", ticket_id)
+        .eq("tenant_id", org_id)
+        .execute()
+        .data
+    )
+    if not result:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ticket not found")
+    return result[0]
+
+
+@router.get("/{org_id}/tools/callbacks")
+async def list_callbacks(
+    org_id: str,
+    ctx: Annotated[TenantContext, Depends(get_tenant_context)],
+    agent_id: str | None = None,
+    callback_status: str | None = None,
+    limit: int = 50,
+):
+    """List callback requests scheduled by voice agents."""
+    db = get_admin_client()
+    query = (
+        db.table("callback_requests")
+        .select("id, tenant_id, agent_id, session_id, customer_name, customer_phone, reason, status, created_at, agents(name, slug)")
+        .eq("tenant_id", org_id)
+        .order("created_at", desc=True)
+        .limit(limit)
+    )
+    if agent_id:
+        query = query.eq("agent_id", agent_id)
+    if callback_status:
+        query = query.eq("status", callback_status)
+
+    raw_data = query.execute().data or []
+    for row in raw_data:
+        agent_data = row.pop("agents", None) or {}
+        row["agent_name"] = agent_data.get("name") or "Voice Agent"
+        row["agent_slug"] = agent_data.get("slug")
+    return {"callbacks": raw_data}
+
+
+@router.patch("/{org_id}/tools/callbacks/{callback_id}")
+async def update_callback_status(
+    org_id: str,
+    callback_id: str,
+    body: UpdateCallbackStatusRequest,
+    ctx: Annotated[TenantContext, Depends(get_tenant_context)],
+):
+    """Update status of a callback request."""
+    db = get_admin_client()
+    result = (
+        db.table("callback_requests")
+        .update({"status": body.status})
+        .eq("id", callback_id)
+        .eq("tenant_id", org_id)
+        .execute()
+        .data
+    )
+    if not result:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Callback request not found")
+    return result[0]
+
+

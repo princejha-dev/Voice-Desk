@@ -1,5 +1,6 @@
 "use client";
 
+import { useMemo } from "react";
 import { StatsCard } from "@/components/dashboard/stats-card";
 import { CallChart } from "@/components/dashboard/call-chart";
 import { RecentCalls } from "@/components/dashboard/recent-calls";
@@ -15,9 +16,9 @@ import { useAgents, useMonitoringOverview, useSessions } from "@/hooks/use-api";
 
 // Fallback chart data while real data loads
 const EMPTY_CHART = [
-  { date: "Mon", calls: 0 }, { date: "Tue", calls: 0 }, { date: "Wed", calls: 0 },
-  { date: "Thu", calls: 0 }, { date: "Fri", calls: 0 }, { date: "Sat", calls: 0 },
-  { date: "Sun", calls: 0 },
+  { date: "Day -6", calls: 0 }, { date: "Day -5", calls: 0 }, { date: "Day -4", calls: 0 },
+  { date: "Day -3", calls: 0 }, { date: "Day -2", calls: 0 }, { date: "Yesterday", calls: 0 },
+  { date: "Today", calls: 0 },
 ];
 
 function formatDuration(seconds?: number) {
@@ -55,10 +56,21 @@ export default function OverviewPage() {
     agent_name: (s.agent_name as string) ?? "Agent",
     caller: "Anonymous",
     duration: formatDuration(s.duration_seconds as number),
-    status: (s.status === "ended" ? "completed" : s.status === "failed" ? "failed" : "active") as "completed" | "failed" | "active",
+    status: (s.status === "completed" || s.status === "ended" ? "completed" : s.status === "failed" ? "failed" : "active") as "completed" | "failed" | "active",
     outcome: s.status as string,
     time: timeAgo(s.started_at as string),
   }));
+
+  const chartData = useMemo(() => {
+    const rawTrend = (overview?.daily_trend as Array<{ date: string; calls: number }>) || [];
+    if (rawTrend.length > 0) {
+      return rawTrend.map((d) => ({
+        date: d.date.slice(5),
+        calls: d.calls,
+      }));
+    }
+    return EMPTY_CHART;
+  }, [overview]);
 
   const loading = agentsLoading || overviewLoading;
 
@@ -123,7 +135,7 @@ export default function OverviewPage() {
       {/* Chart + Agent Health */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
         <div className="lg:col-span-2">
-          <CallChart data={EMPTY_CHART} />
+          <CallChart data={chartData} title="Call Volume (Last 7 Days)" />
         </div>
 
         {/* Agent health */}
@@ -140,7 +152,7 @@ export default function OverviewPage() {
               <div className="text-center py-6 text-muted-foreground text-sm">
                 <Bot className="h-8 w-8 mx-auto mb-2 opacity-30" />
                 No agents yet.{" "}
-                <Link href="/agents/new" className="text-indigo-600 hover:underline">
+                <Link href="/dashboard/agents/new" className="text-indigo-600 hover:underline">
                   Create one
                 </Link>
               </div>
@@ -148,7 +160,8 @@ export default function OverviewPage() {
               agents.slice(0, 6).map((agent) => (
                 <Link
                   key={agent.id as string}
-                  href={`/agents/${agent.id}`}
+                  href={`/c/${agent.slug as string}`}
+                  target="_blank"
                   className="flex items-center justify-between p-2 rounded-lg hover:bg-muted/50 transition-colors group"
                 >
                   <div className="flex items-center gap-2 min-w-0">

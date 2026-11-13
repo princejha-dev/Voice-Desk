@@ -146,7 +146,7 @@ async def ingest_document(doc_id: str, tenant_id: str, agent_id: str | None = No
             tmp_path = tmp.name
 
         try:
-            storage_response = db.storage.from_("knowledge").download(storage_path)
+            storage_response = db.storage.from_("knowledge-documents").download(storage_path)
             with open(tmp_path, "wb") as f:
                 f.write(storage_response)
 
@@ -177,15 +177,17 @@ async def ingest_document(doc_id: str, tenant_id: str, agent_id: str | None = No
         # 7. Insert new chunks
         rows = []
         for idx, (chunk, embedding) in enumerate(zip(chunks, embeddings)):
-            rows.append({
+            row = {
                 "tenant_id": tenant_id,
                 "document_id": doc_id,
-                "agent_id": agent_id or doc.get("agent_id"),
                 "chunk_index": idx,
                 "content": chunk,
                 "embedding": embedding,
-                "token_count": len(chunk) // 4,
-            })
+                "metadata": {"token_count": len(chunk) // 4},
+            }
+            if agent_id or doc.get("agent_id"):
+                row["agent_id"] = agent_id or doc.get("agent_id")
+            rows.append(row)
 
         # Insert in batches of 50
         for i in range(0, len(rows), 50):

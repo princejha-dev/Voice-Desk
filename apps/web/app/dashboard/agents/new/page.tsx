@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { useAuthToken, useOrganization } from "@/hooks/use-api";
+import { useAuthToken, useOrganization, useKnowledgeDocs } from "@/hooks/use-api";
 import { api } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -28,6 +28,10 @@ import {
   Copy,
   ExternalLink,
   Loader2,
+  Calendar,
+  Ticket,
+  Phone,
+  Clock,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
@@ -60,6 +64,16 @@ const defaultConfig = {
     request_callback: true,
     web_search: false,
   },
+  // Structured tool configuration boundaries
+  booking_days: ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"],
+  booking_start_time: "09:00",
+  booking_end_time: "17:00",
+  booking_timezone: "UTC",
+  booking_slot_duration: 30,
+  booking_services: "General Consultation, Product Demo",
+  ticket_departments: "Technical Support, Billing, General",
+  ticket_priority: "medium",
+  callback_sla_hours: 4,
 };
 
 const templateDefaults: Record<string, Partial<typeof defaultConfig>> = {
@@ -101,6 +115,8 @@ export default function CreateAgentPage() {
   const router = useRouter();
   const { orgId } = useOrganization();
   const token = useAuthToken();
+  const { docs: availableDocs, upload: uploadDoc } = useKnowledgeDocs();
+  const [selectedDocIds, setSelectedDocIds] = useState<string[]>([]);
   const [step, setStep] = useState(1);
   const [template, setTemplate] = useState<string | null>(null);
   const [config, setConfig] = useState(defaultConfig);
@@ -115,22 +131,22 @@ export default function CreateAgentPage() {
     }
   }
 
-  function handleUpload(newFiles: File[]) {
+  async function handleUpload(newFiles: File[]) {
+    for (const f of newFiles) {
+      try {
+        await uploadDoc(f);
+        toast.success(`Uploaded ${f.name} to knowledge base`);
+      } catch (err) {
+        toast.error(`Failed to upload ${f.name}`);
+      }
+    }
     const uploaded = newFiles.map((f) => ({
       id: Math.random().toString(36).slice(2),
       name: f.name,
       size: f.size,
-      status: "processing" as const,
+      status: "ready" as const,
     }));
     setFiles((prev) => [...prev, ...uploaded]);
-    // Simulate processing
-    setTimeout(() => {
-      setFiles((prev) =>
-        prev.map((f) =>
-          uploaded.find((u) => u.id === f.id) ? { ...f, status: "ready" } : f
-        )
-      );
-    }, 2000);
   }
 
   async function handleCreate() {
@@ -155,7 +171,37 @@ export default function CreateAgentPage() {
       );
       const newAgent = agentRes.agent;
 
-      // 2. Save configured version
+      // 2. Prepare structured tool configurations
+      const enabledToolsList = Object.entries(config.tools)
+        .filter(([_, enabled]) => enabled)
+        .map(([name]) => name);
+
+      const toolsConfig = {
+        book_appointment: {
+          enabled: config.tools.book_appointment,
+          working_days: config.booking_days,
+          start_time: config.booking_start_time,
+          end_time: config.booking_end_time,
+          timezone: config.booking_timezone,
+          slot_duration_minutes: Number(config.booking_slot_duration) || 30,
+          services: config.booking_services.split(",").map((s) => s.trim()).filter(Boolean),
+        },
+        create_ticket: {
+          enabled: config.tools.create_ticket,
+          departments: config.ticket_departments.split(",").map((s) => s.trim()).filter(Boolean),
+          default_priority: config.ticket_priority,
+        },
+        request_callback: {
+          enabled: config.tools.request_callback,
+          sla_hours: Number(config.callback_sla_hours) || 4,
+        },
+        knowledge_search: {
+          enabled: config.tools.knowledge_search,
+          document_ids: selectedDocIds,
+        },
+      };
+
+      // 3. Save configured version
       const versionRes = await api<{ id: string }>(
         `/api/v1/organizations/${orgId}/agents/${newAgent.id}/versions`,
         {
@@ -180,9 +226,9 @@ export default function CreateAgentPage() {
                 voice_id: "default",
                 voice_name: config.tts_voice,
               },
-              tools: Object.entries(config.tools)
-                .filter(([_, enabled]) => enabled)
-                .map(([name]) => name),
+              tools: enabledToolsList,
+              enabled_tools: enabledToolsList,
+              tools_config: toolsConfig,
               guardrails: {
                 refuse_off_topic: true,
                 require_knowledge_base: config.tools.knowledge_search,
@@ -194,7 +240,20 @@ export default function CreateAgentPage() {
         }
       );
 
-      // 3. Publish this version
+      // 4. Assign authorized documents to agent
+      for (const docId of selectedDocIds) {
+        try {
+          await api(`/api/v1/organizations/${orgId}/knowledge/${docId}/assign`, {
+            method: "POST",
+            body: JSON.stringify({ agent_id: newAgent.id }),
+            token,
+          });
+        } catch {
+          // best-effort doc mapping
+        }
+      }
+
+      // 5. Publish this version
       await api(
         `/api/v1/organizations/${orgId}/agents/${newAgent.id}/publish`,
         {
@@ -208,7 +267,7 @@ export default function CreateAgentPage() {
       if (newAgent.slug) {
         router.push(`/c/${newAgent.slug}`);
       } else {
-        router.push("/agents");
+        router.push("/dashboard/agents");
       }
     } catch (err: any) {
       toast.error(err.message || "Failed to create agent");
@@ -504,14 +563,67 @@ export default function CreateAgentPage() {
               <CardHeader>
                 <CardTitle className="flex items-center gap-2">
                   <BookOpen className="h-5 w-5 text-indigo-500" />
-                  Knowledge Base
+                  Knowledge Base & Document Scoping
                 </CardTitle>
                 <CardDescription>
-                  Upload documents so your agent can answer from your company&apos;s knowledge.
+                  Upload documents and select precisely which documents this agent is authorized to query.
                 </CardDescription>
               </CardHeader>
-              <CardContent>
+              <CardContent className="space-y-4">
                 <UploadZone files={files} onUpload={handleUpload} onRemove={(id) => setFiles((p) => p.filter((f) => f.id !== id))} />
+
+                {/* Document Scoping Selector */}
+                <div className="border-t pt-4 space-y-2">
+                  <p className="text-xs font-semibold uppercase text-muted-foreground tracking-wider">
+                    Authorized Agent Documents ({selectedDocIds.length} selected)
+                  </p>
+                  <p className="text-xs text-muted-foreground">
+                    Only selected documents will be accessible to this agent during live conversations.
+                  </p>
+                  {availableDocs.length === 0 ? (
+                    <p className="text-xs text-muted-foreground italic py-2">
+                      No documents in knowledge base yet. Drag & drop files above to upload.
+                    </p>
+                  ) : (
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-2 pt-1">
+                      {availableDocs.map((doc: Record<string, unknown>) => {
+                        const isChecked = selectedDocIds.includes(doc.id as string);
+                        return (
+                          <label
+                            key={doc.id as string}
+                            className={cn(
+                              "flex items-center gap-2.5 p-2.5 rounded-lg border text-xs cursor-pointer transition-colors",
+                              isChecked ? "border-indigo-500 bg-indigo-50/40" : "hover:bg-muted/50"
+                            )}
+                          >
+                            <input
+                              type="checkbox"
+                              checked={isChecked}
+                              onChange={(e) => {
+                                if (e.target.checked) {
+                                  setSelectedDocIds((prev) => [...prev, doc.id as string]);
+                                } else {
+                                  setSelectedDocIds((prev) => prev.filter((id) => id !== (doc.id as string)));
+                                }
+                              }}
+                              className="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500 h-4 w-4"
+                            />
+                            <BookOpen className="h-4 w-4 text-indigo-500 shrink-0" />
+                            <div className="flex-1 min-w-0">
+                              <p className="font-medium truncate">{((doc.name || doc.filename) as string) || "Document"}</p>
+                              <p className="text-[10px] text-muted-foreground">
+                                {doc.chunk_count as number || 0} chunks
+                              </p>
+                            </div>
+                            <Badge variant={doc.status === "ready" ? "success" : "secondary"} className="text-[10px]">
+                              {(doc.status as string) || "ready"}
+                            </Badge>
+                          </label>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
               </CardContent>
             </Card>
 
@@ -519,36 +631,255 @@ export default function CreateAgentPage() {
               <CardHeader>
                 <CardTitle className="flex items-center gap-2">
                   <Wrench className="h-5 w-5 text-amber-500" />
-                  Tools
+                  Tool Management & Operational Boundaries
                 </CardTitle>
                 <CardDescription>
-                  Enable capabilities your agent can use during conversations.
+                  Configure explicit rules and parameters for each capability so the agent never makes assumptions.
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
-                {[
-                  { key: "knowledge_search", label: "Knowledge Search", desc: "Search uploaded documents to answer questions" },
-                  { key: "book_appointment", label: "Book Appointment", desc: "Schedule appointments and check availability" },
-                  { key: "create_ticket", label: "Create Support Ticket", desc: "Log support issues for follow-up" },
-                  { key: "request_callback", label: "Request Human Callback", desc: "Offer human follow-up when agent can't help" },
-                  { key: "web_search", label: "Web Search", desc: "Search the web for additional information" },
-                ].map((tool) => (
-                  <div key={tool.key} className="flex items-center justify-between rounded-lg border p-4">
+                {/* 1. Knowledge Search */}
+                <div className="rounded-lg border p-4 space-y-3">
+                  <div className="flex items-center justify-between">
                     <div>
-                      <p className="text-sm font-medium">{tool.label}</p>
-                      <p className="text-xs text-muted-foreground mt-0.5">{tool.desc}</p>
+                      <p className="text-sm font-medium flex items-center gap-2">
+                        <BookOpen className="h-4 w-4 text-indigo-500" />
+                        Knowledge Search (RAG)
+                      </p>
+                      <p className="text-xs text-muted-foreground mt-0.5">
+                        Answer queries using the authorized documents selected above via pgvector
+                      </p>
                     </div>
                     <Switch
-                      checked={config.tools[tool.key as keyof typeof config.tools]}
+                      checked={config.tools.knowledge_search}
                       onCheckedChange={(checked) =>
                         setConfig({
                           ...config,
-                          tools: { ...config.tools, [tool.key]: checked },
+                          tools: { ...config.tools, knowledge_search: checked },
                         })
                       }
                     />
                   </div>
-                ))}
+                </div>
+
+                {/* 2. Appointment Booking */}
+                <div className="rounded-lg border p-4 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-sm font-medium flex items-center gap-2">
+                        <Calendar className="h-4 w-4 text-violet-500" />
+                        Appointment Booking
+                      </p>
+                      <p className="text-xs text-muted-foreground mt-0.5">
+                        Book customer appointments directly into your schedule with availability checks
+                      </p>
+                    </div>
+                    <Switch
+                      checked={config.tools.book_appointment}
+                      onCheckedChange={(checked) =>
+                        setConfig({
+                          ...config,
+                          tools: { ...config.tools, book_appointment: checked },
+                        })
+                      }
+                    />
+                  </div>
+
+                  {config.tools.book_appointment && (
+                    <div className="mt-3 p-4 rounded-md bg-muted/40 border space-y-4">
+                      <p className="text-xs font-semibold uppercase text-violet-700 tracking-wider">
+                        Operating Hours & Availability Settings
+                      </p>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs">
+                        <div>
+                          <Label className="text-xs font-medium">Daily Operating Window</Label>
+                          <div className="flex items-center gap-2 mt-1">
+                            <Input
+                              type="time"
+                              value={config.booking_start_time}
+                              onChange={(e) => setConfig({ ...config, booking_start_time: e.target.value })}
+                              className="h-8 text-xs bg-background"
+                            />
+                            <span className="text-muted-foreground">to</span>
+                            <Input
+                              type="time"
+                              value={config.booking_end_time}
+                              onChange={(e) => setConfig({ ...config, booking_end_time: e.target.value })}
+                              className="h-8 text-xs bg-background"
+                            />
+                          </div>
+                        </div>
+                        <div>
+                          <Label className="text-xs font-medium">Timezone</Label>
+                          <Select
+                            value={config.booking_timezone}
+                            onValueChange={(v) => setConfig({ ...config, booking_timezone: v })}
+                          >
+                            <SelectTrigger className="h-8 text-xs mt-1 bg-background"><SelectValue /></SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="UTC">UTC</SelectItem>
+                              <SelectItem value="America/New_York">Eastern Time (US / NY)</SelectItem>
+                              <SelectItem value="America/Chicago">Central Time (US / Chicago)</SelectItem>
+                              <SelectItem value="America/Los_Angeles">Pacific Time (US / LA)</SelectItem>
+                              <SelectItem value="Europe/London">London (GMT / BST)</SelectItem>
+                              <SelectItem value="Asia/Kolkata">India Standard Time (IST)</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        <div>
+                          <Label className="text-xs font-medium">Slot Duration</Label>
+                          <Select
+                            value={String(config.booking_slot_duration)}
+                            onValueChange={(v) => setConfig({ ...config, booking_slot_duration: Number(v) })}
+                          >
+                            <SelectTrigger className="h-8 text-xs mt-1 bg-background"><SelectValue /></SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="15">15 minutes</SelectItem>
+                              <SelectItem value="30">30 minutes</SelectItem>
+                              <SelectItem value="45">45 minutes</SelectItem>
+                              <SelectItem value="60">60 minutes</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        <div>
+                          <Label className="text-xs font-medium">Services Offered (comma-separated)</Label>
+                          <Input
+                            value={config.booking_services}
+                            onChange={(e) => setConfig({ ...config, booking_services: e.target.value })}
+                            placeholder="Consultation, Demo, Follow-up"
+                            className="h-8 text-xs mt-1 bg-background"
+                          />
+                        </div>
+                      </div>
+
+                      <div>
+                        <Label className="text-xs font-medium">Working Days</Label>
+                        <div className="flex flex-wrap gap-2 mt-1.5">
+                          {["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"].map((day) => {
+                            const isChecked = config.booking_days.includes(day);
+                            return (
+                              <button
+                                type="button"
+                                key={day}
+                                onClick={() => {
+                                  const updated = isChecked
+                                    ? config.booking_days.filter((d: string) => d !== day)
+                                    : [...config.booking_days, day];
+                                  setConfig({ ...config, booking_days: updated });
+                                }}
+                                className={cn(
+                                  "px-2.5 py-1 text-xs rounded border font-medium transition-colors",
+                                  isChecked
+                                    ? "bg-violet-600 text-white border-violet-600 shadow-sm"
+                                    : "bg-background text-muted-foreground hover:bg-muted"
+                                )}
+                              >
+                                {day.slice(0, 3)}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {/* 3. Support Tickets */}
+                <div className="rounded-lg border p-4 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-sm font-medium flex items-center gap-2">
+                        <Ticket className="h-4 w-4 text-amber-500" />
+                        Create Support Ticket
+                      </p>
+                      <p className="text-xs text-muted-foreground mt-0.5">
+                        Log issues with caller details and priority into your support queue
+                      </p>
+                    </div>
+                    <Switch
+                      checked={config.tools.create_ticket}
+                      onCheckedChange={(checked) =>
+                        setConfig({
+                          ...config,
+                          tools: { ...config.tools, create_ticket: checked },
+                        })
+                      }
+                    />
+                  </div>
+
+                  {config.tools.create_ticket && (
+                    <div className="mt-3 p-4 rounded-md bg-muted/40 border space-y-3">
+                      <p className="text-xs font-semibold uppercase text-amber-700 tracking-wider">
+                        Support Ticket Configuration
+                      </p>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs">
+                        <div>
+                          <Label className="text-xs font-medium">Routing Departments (comma-separated)</Label>
+                          <Input
+                            value={config.ticket_departments}
+                            onChange={(e) => setConfig({ ...config, ticket_departments: e.target.value })}
+                            className="h-8 text-xs mt-1 bg-background"
+                          />
+                        </div>
+                        <div>
+                          <Label className="text-xs font-medium">Default Priority</Label>
+                          <Select
+                            value={config.ticket_priority}
+                            onValueChange={(v) => setConfig({ ...config, ticket_priority: v })}
+                          >
+                            <SelectTrigger className="h-8 text-xs mt-1 bg-background"><SelectValue /></SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="low">Low</SelectItem>
+                              <SelectItem value="medium">Medium</SelectItem>
+                              <SelectItem value="high">High</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {/* 4. Request Human Callback */}
+                <div className="rounded-lg border p-4 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-sm font-medium flex items-center gap-2">
+                        <Phone className="h-4 w-4 text-emerald-500" />
+                        Request Human Callback
+                      </p>
+                      <p className="text-xs text-muted-foreground mt-0.5">
+                        Capture caller phone number for human callback when requested or escalated
+                      </p>
+                    </div>
+                    <Switch
+                      checked={config.tools.request_callback}
+                      onCheckedChange={(checked) =>
+                        setConfig({
+                          ...config,
+                          tools: { ...config.tools, request_callback: checked },
+                        })
+                      }
+                    />
+                  </div>
+
+                  {config.tools.request_callback && (
+                    <div className="mt-3 p-3 rounded-md bg-muted/40 border space-y-2">
+                      <p className="text-xs font-semibold uppercase text-emerald-700 tracking-wider">
+                        Callback SLA
+                      </p>
+                      <div className="max-w-xs">
+                        <Label className="text-xs font-medium">Expected Callback Timeframe (Hours)</Label>
+                        <Input
+                          type="number"
+                          value={config.callback_sla_hours}
+                          onChange={(e) => setConfig({ ...config, callback_sla_hours: Number(e.target.value) || 4 })}
+                          className="h-8 text-xs mt-1 bg-background"
+                        />
+                      </div>
+                    </div>
+                  )}
+                </div>
               </CardContent>
             </Card>
           </div>

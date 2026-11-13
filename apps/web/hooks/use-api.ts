@@ -400,3 +400,108 @@ export function useApiKeys() {
 
   return { keys, loading, refetch, createKey, revokeKey };
 }
+
+// ── Tool Operations Data ────────────────────────────────────────────────────────
+
+export function useBookings(agentId?: string) {
+  const { orgId } = useOrganization();
+  const token = useAuthToken();
+  const [bookings, setBookings] = useState<Record<string, unknown>[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  const refetch = useCallback(() => {
+    if (!orgId || !token) return;
+    setLoading(true);
+    const path = `/api/v1/organizations/${orgId}/tools/bookings${agentId ? `?agent_id=${agentId}` : ""}`;
+    api<{ bookings: Record<string, unknown>[] }>(path, { token })
+      .then((res) => setBookings(res.bookings ?? []))
+      .catch(console.error)
+      .finally(() => setLoading(false));
+  }, [orgId, token, agentId]);
+
+  useEffect(() => { refetch(); }, [refetch]);
+
+  const updateStatus = useCallback(
+    async (bookingId: string, status: string, notes?: string) => {
+      if (!orgId || !token) return;
+      await api(`/api/v1/organizations/${orgId}/tools/bookings/${bookingId}`, {
+        method: "PATCH",
+        body: JSON.stringify({ status, notes }),
+        token,
+      });
+      refetch();
+    },
+    [orgId, token, refetch]
+  );
+
+  return { bookings, loading, refetch, updateStatus };
+}
+
+export function useTickets(agentId?: string) {
+  const { orgId } = useOrganization();
+  const token = useAuthToken();
+  const [tickets, setTickets] = useState<Record<string, unknown>[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  const refetch = useCallback(() => {
+    if (!orgId || !token) return;
+    setLoading(true);
+    const path = `/api/v1/organizations/${orgId}/tools/tickets${agentId ? `?agent_id=${agentId}` : ""}`;
+    api<{ tickets: Record<string, unknown>[] }>(path, { token })
+      .then((res) => setTickets(res.tickets ?? []))
+      .catch(console.error)
+      .finally(() => setLoading(false));
+  }, [orgId, token, agentId]);
+
+  useEffect(() => { refetch(); }, [refetch]);
+
+  const updateStatus = useCallback(
+    async (ticketId: string, status: string, priority?: string) => {
+      if (!orgId || !token) return;
+      await api(`/api/v1/organizations/${orgId}/tools/tickets/${ticketId}`, {
+        method: "PATCH",
+        body: JSON.stringify({ status, priority }),
+        token,
+      });
+      refetch();
+    },
+    [orgId, token, refetch]
+  );
+
+  return { tickets, loading, refetch, updateStatus };
+}
+
+export function useCallbacks(agentId?: string) {
+  const { orgId } = useOrganization();
+  const token = useAuthToken();
+  const [callbacks, setCallbacks] = useState<Record<string, unknown>[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  const refetch = useCallback(() => {
+    if (!orgId || !token) return;
+    setLoading(true);
+    const path = `/api/v1/organizations/${orgId}/tools/callbacks${agentId ? `?agent_id=${agentId}` : ""}`;
+    api<{ callbacks: Record<string, unknown>[] }>(path, { token })
+      .then((res) => setCallbacks(res.callbacks ?? []))
+      .catch(console.error)
+      .finally(() => setLoading(false));
+  }, [orgId, token, agentId]);
+
+  useEffect(() => { refetch(); }, [refetch]);
+
+  const updateStatus = useCallback(
+    async (callbackId: string, status: string) => {
+      if (!orgId || !token) return;
+      await api(`/api/v1/organizations/${orgId}/tools/callbacks/${callbackId}`, {
+        method: "PATCH",
+        body: JSON.stringify({ status }),
+        token,
+      });
+      refetch();
+    },
+    [orgId, token, refetch]
+  );
+
+  return { callbacks, loading, refetch, updateStatus };
+}
+

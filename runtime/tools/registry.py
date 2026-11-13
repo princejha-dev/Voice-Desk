@@ -44,7 +44,7 @@ def get_tools_for_agent(config: dict, session_ctx: SessionContext) -> List[Calla
     Returns:
         List of partial callables ready to pass to the LiveKit Agent.
     """
-    enabled: list[str] = config.get("enabled_tools", [])
+    enabled: list[str] = config.get("enabled_tools") or config.get("tools") or []
     tools: list[Callable] = []
 
     for tool_id in enabled:

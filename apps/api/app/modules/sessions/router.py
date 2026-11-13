@@ -30,7 +30,7 @@ async def list_sessions(
 
     query = (
         db.table("call_sessions")
-        .select("id, agent_id, tenant_id, room_name, status, started_at, ended_at, duration_seconds, participant_identity, metadata")
+        .select("id, agent_id, tenant_id, room_name, status, started_at, ended_at, duration_seconds, participant_identity, metadata, agents(name, slug)")
         .eq("tenant_id", org_id)
         .order("started_at", desc=True)
         .range(offset, offset + limit - 1)
@@ -40,7 +40,21 @@ async def list_sessions(
     if session_status:
         query = query.eq("status", session_status)
 
-    sessions = query.execute().data
+    raw_sessions = query.execute().data or []
+    sessions = []
+    for s in raw_sessions:
+        agent_data = s.pop("agents", None) or {}
+        s["agent_name"] = agent_data.get("name") or "Agent"
+        s["agent_slug"] = agent_data.get("slug")
+        if not s.get("duration_seconds") and s.get("started_at") and s.get("ended_at"):
+            try:
+                t1 = datetime.fromisoformat(s["started_at"].replace("Z", "+00:00"))
+                t2 = datetime.fromisoformat(s["ended_at"].replace("Z", "+00:00"))
+                s["duration_seconds"] = max(0, int((t2 - t1).total_seconds()))
+            except Exception:
+                pass
+        sessions.append(s)
+
     return {"sessions": sessions, "limit": limit, "offset": offset}
 
 

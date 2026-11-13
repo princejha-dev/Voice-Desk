@@ -5,6 +5,7 @@ tenant_id is taken from session_ctx — never from LLM arguments.
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 import uuid
@@ -58,18 +59,20 @@ async def request_callback(
 
     client = _get_supabase()
     try:
-        client.table("callback_requests").insert(
-            {
-                "id": callback_id,
-                "tenant_id": session_ctx.tenant_id,   # always from session_ctx
-                "agent_id": session_ctx.agent_id,
-                "session_id": session_ctx.session_id,
-                "phone_number": phone_number.strip(),
-                "preferred_time": preferred_time,
-                "status": "pending",
-                "created_at": now,
-            }
-        ).execute()
+        await asyncio.to_thread(
+            lambda: client.table("callback_requests").insert(
+                {
+                    "id": callback_id,
+                    "tenant_id": session_ctx.tenant_id,   # always from session_ctx
+                    "agent_id": session_ctx.agent_id,
+                    "session_id": session_ctx.session_id,
+                    "customer_phone": phone_number.strip(),
+                    "reason": preferred_time or "Customer requested phone callback",
+                    "status": "pending",
+                    "created_at": now,
+                }
+            ).execute()
+        )
     except Exception:
         logger.exception(
             "Failed to insert callback_request for session %s",

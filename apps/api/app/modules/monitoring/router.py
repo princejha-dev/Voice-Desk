@@ -25,38 +25,63 @@ async def get_monitoring_overview(
     org_id: str,
     ctx: Annotated[TenantContext, Depends(get_tenant_context)],
 ):
-    """Aggregate metrics for the organization: today's calls, avg duration, success rate."""
+    """Aggregate metrics for the organization: today's calls, avg duration, success rate, 7-day trend."""
     db = get_admin_client()
 
     today_start = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0).isoformat()
+    seven_days_ago = (datetime.now(timezone.utc) - timedelta(days=6)).replace(hour=0, minute=0, second=0, microsecond=0).isoformat()
 
-    all_today = (
+    all_recent = (
         db.table("call_sessions")
-        .select("id, status, duration_seconds, started_at")
+        .select("id, status, duration_seconds, started_at, ended_at")
         .eq("tenant_id", org_id)
-        .gte("started_at", today_start)
+        .gte("started_at", seven_days_ago)
         .execute()
         .data
     )
 
+    all_today = [s for s in all_recent if (s.get("started_at") or "") >= today_start]
     total_calls = len(all_today)
-    ended = [s for s in all_today if s.get("status") == "ended"]
-    successful = [s for s in ended if s.get("duration_seconds") and s["duration_seconds"] > 0]
-
-    durations = [s["duration_seconds"] for s in ended if s.get("duration_seconds")]
-    avg_duration = round(sum(durations) / len(durations), 1) if durations else 0
-    success_rate = round(len(successful) / total_calls * 100, 1) if total_calls > 0 else 0
-
-    # Active sessions (started but not ended)
+    ended = [s for s in all_today if s.get("status") in ("completed", "ended")]
+    failed = [s for s in all_today if s.get("status") == "failed"]
     active_count = len([s for s in all_today if s.get("status") == "active"])
+
+    durations: list[float] = []
+    for s in ended:
+        if s.get("duration_seconds"):
+            durations.append(float(s["duration_seconds"]))
+        elif s.get("started_at") and s.get("ended_at"):
+            try:
+                t1 = datetime.fromisoformat(s["started_at"].replace("Z", "+00:00"))
+                t2 = datetime.fromisoformat(s["ended_at"].replace("Z", "+00:00"))
+                durations.append(max(0.0, (t2 - t1).total_seconds()))
+            except Exception:
+                pass
+
+    avg_duration = round(sum(durations) / len(durations), 1) if durations else 0
+    successful = [d for d in durations if d > 0]
+    success_rate = round(len(successful) / total_calls * 100, 1) if total_calls > 0 else (100.0 if total_calls > 0 and not failed else 0.0)
+
+    # 7-day daily breakdown
+    daily: dict[str, int] = {}
+    for i in range(7):
+        day_str = (datetime.now(timezone.utc) - timedelta(days=6 - i)).strftime("%Y-%m-%d")
+        daily[day_str] = 0
+    for s in all_recent:
+        day = (s.get("started_at") or "")[:10]
+        if day in daily:
+            daily[day] += 1
+    daily_trend = [{"date": k, "calls": v} for k, v in sorted(daily.items())]
 
     return {
         "date": today_start[:10],
         "total_calls_today": total_calls,
         "active_calls": active_count,
+        "failed_calls": len(failed),
         "avg_duration_seconds": avg_duration,
         "success_rate_percent": success_rate,
         "ended_calls": len(ended),
+        "daily_trend": daily_trend,
     }
 
 
@@ -74,7 +99,7 @@ async def get_agent_analytics(
 
     sessions = (
         db.table("call_sessions")
-        .select("id, status, duration_seconds, started_at, metadata")
+        .select("id, status, duration_seconds, started_at, ended_at, metadata")
         .eq("tenant_id", org_id)
         .eq("agent_id", agent_id)
         .gte("started_at", since)
@@ -83,16 +108,31 @@ async def get_agent_analytics(
     )
 
     total = len(sessions)
-    ended = [s for s in sessions if s.get("status") == "ended"]
-    durations = [s["duration_seconds"] for s in ended if s.get("duration_seconds")]
+    ended = [s for s in sessions if s.get("status") in ("completed", "ended")]
+
+    durations: list[float] = []
+    for s in ended:
+        if s.get("duration_seconds"):
+            durations.append(float(s["duration_seconds"]))
+        elif s.get("started_at") and s.get("ended_at"):
+            try:
+                t1 = datetime.fromisoformat(s["started_at"].replace("Z", "+00:00"))
+                t2 = datetime.fromisoformat(s["ended_at"].replace("Z", "+00:00"))
+                durations.append(max(0.0, (t2 - t1).total_seconds()))
+            except Exception:
+                pass
+
     avg_duration = round(sum(durations) / len(durations), 1) if durations else 0
 
     # Daily breakdown
     daily: dict[str, int] = {}
+    for i in range(days):
+        day_str = (datetime.now(timezone.utc) - timedelta(days=days - 1 - i)).strftime("%Y-%m-%d")
+        daily[day_str] = 0
     for s in sessions:
         day = (s.get("started_at") or "")[:10]
-        if day:
-            daily[day] = daily.get(day, 0) + 1
+        if day in daily:
+            daily[day] += 1
 
     daily_sorted = [{"date": k, "calls": v} for k, v in sorted(daily.items())]
 
@@ -123,11 +163,16 @@ async def live_monitoring_ws(
     try:
         redis = await get_redis_connection()
         pubsub = redis.pubsub()
-        channel = f"voicedesk:live:{org_id}:*"
 
-        # Subscribe to org-level channel
-        await pubsub.psubscribe(f"voicedesk:live:{org_id}:*")
+        # Subscribe to both org-level channel patterns
+        await pubsub.psubscribe(
+            f"voicedesk:events:{org_id}*",
+            f"voicedesk:live:{org_id}*",
+        )
         logger.info("WS client connected to live monitoring for org %s", org_id)
+
+        # Send initial connection confirmation
+        await websocket.send_text(json.dumps({"type": "connection", "status": "connected", "org_id": org_id}))
 
         async for message in pubsub.listen():
             if message["type"] in ("pmessage", "message"):
@@ -138,9 +183,9 @@ async def live_monitoring_ws(
     except WebSocketDisconnect:
         logger.info("WS client disconnected from live monitoring for org %s", org_id)
     except Exception as exc:
-        logger.error("WS error for org %s: %s", org_id, exc)
+        logger.warning("WS connection or Redis unavailable for org %s: %s", org_id, exc)
         try:
-            await websocket.send_text(json.dumps({"error": str(exc)}))
+            await websocket.send_text(json.dumps({"type": "status", "status": "redis_offline", "detail": str(exc)}))
         except Exception:
             pass
     finally:

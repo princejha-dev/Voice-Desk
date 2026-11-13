@@ -6,6 +6,7 @@ They are NEVER derived from the query string or any LLM output.
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 from typing import TYPE_CHECKING
@@ -80,17 +81,20 @@ async def knowledge_search(query: str, session_ctx: SessionContext) -> str:
     #    tenant_id and agent_id come from session_ctx — NEVER from the query.
     client_db = _get_supabase()
     try:
-        response = client_db.rpc(
-            "match_knowledge_chunks",
-            {
-                "query_embedding": query_embedding,
-                "match_tenant_id": session_ctx.tenant_id,   # server-side
-                "match_agent_id": session_ctx.agent_id,     # server-side
-                "match_count": _TOP_K,
-            },
-        ).execute()
+        response = await asyncio.to_thread(
+            lambda: client_db.rpc(
+                "search_knowledge",
+                {
+                    "p_tenant_id": session_ctx.tenant_id,
+                    "p_agent_id": session_ctx.agent_id,
+                    "p_query_embedding": query_embedding,
+                    "p_match_count": _TOP_K,
+                    "p_match_threshold": 0.5,
+                },
+            ).execute()
+        )
     except Exception:
-        logger.exception("Failed to query knowledge_chunks for session %s", session_ctx.session_id)
+        logger.exception("Failed to query search_knowledge for session %s", session_ctx.session_id)
         return "Knowledge search is temporarily unavailable."
 
     rows: list[dict] = response.data or []
