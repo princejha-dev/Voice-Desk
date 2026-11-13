@@ -50,7 +50,7 @@ const defaultConfig = {
   instructions: "",
   personality: "",
   llm_provider: "openai",
-  llm_model: "gpt-4.1-mini",
+  llm_model: "gpt-4o-mini",
   llm_temperature: 0.3,
   stt_provider: "deepgram",
   stt_model: "nova-3",
@@ -453,8 +453,8 @@ export default function CreateAgentPage() {
                     >
                       <SelectTrigger><SelectValue /></SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="gpt-4.1-mini">GPT-4.1 Mini</SelectItem>
-                        <SelectItem value="gpt-4.1">GPT-4.1</SelectItem>
+                        <SelectItem value="gpt-4o-mini">GPT-4o Mini (Fastest)</SelectItem>
+                        <SelectItem value="gpt-4o">GPT-4o (High Intelligence)</SelectItem>
                         <SelectItem value="gpt-4o">GPT-4o</SelectItem>
                         <SelectItem value="claude-sonnet-4">Claude Sonnet 4</SelectItem>
                         <SelectItem value="gemini-2.5-flash">Gemini 2.5 Flash</SelectItem>

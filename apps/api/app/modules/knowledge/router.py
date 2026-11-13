@@ -60,6 +60,7 @@ async def upload_knowledge_document(
     ctx: Annotated[TenantContext, Depends(get_tenant_context)],
     background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
+    agent_id: str | None = None,
 ):
     """Upload a knowledge document and trigger background ingestion."""
     if file.content_type not in ALLOWED_MIME_TYPES:
@@ -76,43 +77,89 @@ async def upload_knowledge_document(
     # Upload to Supabase storage
     file_bytes = await file.read()
     try:
-        db.storage.from_(STORAGE_BUCKET).upload(
-            path=file_path,
-            file=file_bytes,
-            file_options={"content-type": file.content_type},
-        )
+        try:
+            db.storage.from_(STORAGE_BUCKET).upload(
+                path=file_path,
+                file=file_bytes,
+                file_options={"content-type": file.content_type},
+            )
+        except Exception as upload_err:
+            if "not found" in str(upload_err).lower() or "bucket" in str(upload_err).lower():
+                try:
+                    db.storage.create_bucket(STORAGE_BUCKET, options={"public": False})
+                except Exception:
+                    pass
+                db.storage.from_(STORAGE_BUCKET).upload(
+                    path=file_path,
+                    file=file_bytes,
+                    file_options={"content-type": file.content_type},
+                )
+            else:
+                raise upload_err
     except Exception as exc:
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail=f"Storage upload failed: {exc}",
         ) from exc
 
+    # Ensure agent_id is present if table requires it
+    if not agent_id:
+        try:
+            agent_res = db.table("agents").select("id").eq("tenant_id", org_id).limit(1).execute()
+            if agent_res.data:
+                agent_id = agent_res.data[0]["id"]
+            else:
+                new_agent = db.table("agents").insert({
+                    "tenant_id": org_id,
+                    "name": "General Assistant",
+                    "status": "draft",
+                }).execute().data
+                if new_agent:
+                    agent_id = new_agent[0]["id"]
+        except Exception:
+            pass
+
     # Insert knowledge_documents row
+    doc_payload = {
+        "id": doc_id,
+        "tenant_id": org_id,
+        "filename": file.filename,
+        "file_path": file_path,
+        "mime_type": file.content_type,
+        "file_size": len(file_bytes),
+        "status": "processing",
+        "chunk_count": 0,
+        "created_at": now,
+        "updated_at": now,
+    }
+    if agent_id:
+        doc_payload["agent_id"] = agent_id
+
     doc = (
         db.table("knowledge_documents")
-        .insert({
-            "id": doc_id,
-            "tenant_id": org_id,
-            "filename": file.filename,
-            "file_path": file_path,
-            "mime_type": file.content_type,
-            "file_size": len(file_bytes),
-            "status": "processing",
-            "chunk_count": 0,
-            "created_at": now,
-            "updated_at": now,
-        })
+        .insert(doc_payload)
         .execute()
         .data[0]
     )
 
+    if agent_id:
+        try:
+            db.table("agent_knowledge_documents").insert({
+                "tenant_id": org_id,
+                "agent_id": agent_id,
+                "document_id": doc_id,
+            }).execute()
+        except Exception:
+            pass
+
     # Trigger background ingestion
     from app.workers.ingestion_worker import ingest_document
-    background_tasks.add_task(ingest_document, doc_id, org_id)
+    background_tasks.add_task(ingest_document, doc_id, org_id, agent_id)
 
     return {
         "document_id": doc_id,
         "name": file.filename,
+        "agent_id": agent_id,
         "status": "processing",
         "message": "Document uploaded. Ingestion started in the background.",
     }

@@ -118,7 +118,8 @@ async def ingest_document(doc_id: str, tenant_id: str, agent_id: str | None = No
     """
     settings = get_settings()
     db = get_admin_client()
-    openai = AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
+    api_key = getattr(settings, "OPENAI_API_KEY", None) or os.environ.get("OPENAI_API_KEY")
+    openai = AsyncOpenAI(api_key=api_key)
 
     # Mark as processing
     db.table("knowledge_documents").update({"status": "processing"}).eq("id", doc_id).eq("tenant_id", tenant_id).execute()
@@ -137,7 +138,7 @@ async def ingest_document(doc_id: str, tenant_id: str, agent_id: str | None = No
             raise ValueError(f"Document {doc_id} not found for tenant {tenant_id}")
 
         doc = result.data
-        storage_path = doc.get("storage_path") or f"{tenant_id}/{doc_id}/{doc['filename']}"
+        storage_path = doc.get("file_path") or doc.get("storage_path") or f"{tenant_id}/{doc_id}/{doc['filename']}"
         filename = doc.get("filename", "document.txt")
 
         # 2. Download from Supabase storage
@@ -175,6 +176,15 @@ async def ingest_document(doc_id: str, tenant_id: str, agent_id: str | None = No
         db.table("knowledge_chunks").delete().eq("document_id", doc_id).eq("tenant_id", tenant_id).execute()
 
         # 7. Insert new chunks
+        c_agent_id = agent_id or doc.get("agent_id")
+        if not c_agent_id:
+            try:
+                agent_res = db.table("agents").select("id").eq("tenant_id", tenant_id).limit(1).execute()
+                if agent_res.data:
+                    c_agent_id = agent_res.data[0]["id"]
+            except Exception:
+                pass
+
         rows = []
         for idx, (chunk, embedding) in enumerate(zip(chunks, embeddings)):
             row = {
@@ -185,8 +195,8 @@ async def ingest_document(doc_id: str, tenant_id: str, agent_id: str | None = No
                 "embedding": embedding,
                 "metadata": {"token_count": len(chunk) // 4},
             }
-            if agent_id or doc.get("agent_id"):
-                row["agent_id"] = agent_id or doc.get("agent_id")
+            if c_agent_id:
+                row["agent_id"] = c_agent_id
             rows.append(row)
 
         # Insert in batches of 50

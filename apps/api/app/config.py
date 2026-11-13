@@ -31,6 +31,11 @@ class Settings(BaseSettings):
     # ── Redis ─────────────────────────────────────────────────────────────
     REDIS_URL: str = "redis://localhost:6379/0"
 
+    # ── AI Providers ──────────────────────────────────────────────────────
+    OPENAI_API_KEY: str = ""
+    CARTESIA_API_KEY: str = ""
+    DEEPGRAM_API_KEY: str = ""
+
     # ── Encryption ────────────────────────────────────────────────────────
     ENCRYPTION_KEY: str = ""  # 32-byte URL-safe base64 Fernet key
 

@@ -89,6 +89,14 @@ class DynamicVoiceAgent:
                 "- CALLBACKS: When a caller requests a callback or human escalation, ask for their phone number and confirm the request."
             )
 
+        # Custom webhook tools rules
+        custom_tools = self.config.get("custom_tools", [])
+        for ct in custom_tools:
+            if isinstance(ct, dict) and ct.get("name"):
+                c_name = ct.get("name")
+                c_desc = ct.get("description", "")
+                tool_rules.append(f"- CUSTOM ACTION '{c_name}': {c_desc}")
+
         if tool_rules:
             system_prompt += "\n\n### Operational Rules & Tool Boundaries\n" + "\n".join(tool_rules)
 

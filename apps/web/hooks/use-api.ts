@@ -153,6 +153,51 @@ export function useAgent(agentId: string | undefined) {
   return { agent, loading, refetch };
 }
 
+export function useAgentVersions(agentId: string | undefined) {
+  const { orgId } = useOrganization();
+  const token = useAuthToken();
+  const [versions, setVersions] = useState<Record<string, unknown>[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  const refetch = useCallback(() => {
+    if (!orgId || !token || !agentId) return;
+    setLoading(true);
+    api<{ versions: Record<string, unknown>[] }>(
+      `/api/v1/organizations/${orgId}/agents/${agentId}/versions`,
+      { token }
+    )
+      .then((res) => setVersions(res.versions ?? []))
+      .catch(console.error)
+      .finally(() => setLoading(false));
+  }, [orgId, token, agentId]);
+
+  useEffect(() => { refetch(); }, [refetch]);
+
+  const saveVersion = useCallback(
+    async (config: Record<string, unknown>) => {
+      if (!orgId || !token || !agentId) throw new Error("Not authenticated");
+      return api<Record<string, unknown>>(
+        `/api/v1/organizations/${orgId}/agents/${agentId}/versions`,
+        { method: "POST", body: JSON.stringify({ config }), token }
+      );
+    },
+    [orgId, token, agentId]
+  );
+
+  const publishVersion = useCallback(
+    async (versionId: string) => {
+      if (!orgId || !token || !agentId) throw new Error("Not authenticated");
+      return api<Record<string, unknown>>(
+        `/api/v1/organizations/${orgId}/agents/${agentId}/publish`,
+        { method: "POST", body: JSON.stringify({ version_id: versionId }), token }
+      );
+    },
+    [orgId, token, agentId]
+  );
+
+  return { versions, loading, refetch, saveVersion, publishVersion };
+}
+
 // ── Sessions ───────────────────────────────────────────────────────────────────
 
 export function useSessions(filters?: { agentId?: string; limit?: number }) {
@@ -243,11 +288,14 @@ export function useKnowledgeDocs() {
   useEffect(() => { refetch(); }, [refetch]);
 
   const upload = useCallback(
-    async (file: File) => {
+    async (file: File, agentId?: string) => {
       if (!orgId || !token) return;
       const form = new FormData();
       form.append("file", file);
-      return api(`/api/v1/organizations/${orgId}/knowledge/upload`, {
+      const url = agentId
+        ? `/api/v1/organizations/${orgId}/knowledge/upload?agent_id=${agentId}`
+        : `/api/v1/organizations/${orgId}/knowledge/upload`;
+      return api(url, {
         method: "POST",
         body: form,
         token,

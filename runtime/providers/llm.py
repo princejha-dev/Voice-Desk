@@ -27,6 +27,12 @@ def create_llm(config: dict) -> agent_llm.LLM:
     provider = (config.get("provider") or "openai").lower()
     model = config.get("model") or "gpt-4o-mini"
 
+    # Normalize any accidental typos or legacy model names
+    if "4.1-mini" in model or model == "gpt-4-mini":
+        model = "gpt-4o-mini"
+    elif "4.1" in model:
+        model = "gpt-4o"
+
     if provider == "openai":
         api_key = os.environ.get("OPENAI_API_KEY")
         if not api_key:
