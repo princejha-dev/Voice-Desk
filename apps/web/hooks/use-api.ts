@@ -315,7 +315,63 @@ export function useKnowledgeDocs() {
     [orgId, token]
   );
 
-  return { docs, loading, refetch, upload, deleteDoc };
+  const updateStatus = useCallback(
+    async (docId: string, status: "ready" | "deactivated") => {
+      if (!orgId || !token) return;
+      return api(`/api/v1/organizations/${orgId}/knowledge/${docId}/status`, {
+        method: "PATCH",
+        body: JSON.stringify({ status }),
+        token,
+      });
+    },
+    [orgId, token]
+  );
+
+  const assignAgent = useCallback(
+    async (docId: string, agentId: string) => {
+      if (!orgId || !token) return;
+      return api(`/api/v1/organizations/${orgId}/knowledge/${docId}/assign`, {
+        method: "POST",
+        body: JSON.stringify({ agent_id: agentId }),
+        token,
+      });
+    },
+    [orgId, token]
+  );
+
+  const unassignAgent = useCallback(
+    async (docId: string, agentId: string) => {
+      if (!orgId || !token) return;
+      return api(`/api/v1/organizations/${orgId}/knowledge/${docId}/assign/${agentId}`, {
+        method: "DELETE",
+        token,
+      });
+    },
+    [orgId, token]
+  );
+
+  const getSourceContent = useCallback(
+    async (docId: string) => {
+      if (!orgId || !token) return null;
+      return api<{ document: Record<string, unknown>; chunks: Record<string, unknown>[] }>(
+        `/api/v1/organizations/${orgId}/knowledge/${docId}/content`,
+        { token }
+      );
+    },
+    [orgId, token]
+  );
+
+  return {
+    docs,
+    loading,
+    refetch,
+    upload,
+    deleteDoc,
+    updateStatus,
+    assignAgent,
+    unassignAgent,
+    getSourceContent,
+  };
 }
 
 // ── Billing ────────────────────────────────────────────────────────────────────

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -11,33 +11,113 @@ import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
+import { Skeleton } from "@/components/ui/skeleton";
 import {
-  Building2, Users, Bell, Shield, Trash2, Plus,
-  Save, User, Mail, Calendar, ChevronRight, AlertTriangle,
+  Building2,
+  Users,
+  Bell,
+  Shield,
+  Save,
+  AlertTriangle,
+  Copy,
+  Check,
+  Loader2,
 } from "lucide-react";
+import { useOrganization, useAuthToken } from "@/hooks/use-api";
+import { createClient } from "@/lib/supabase/client";
+import { api } from "@/lib/api";
 import { toast } from "sonner";
 
-const demoMembers = [
-  { id: "u1", name: "Prince Jha", email: "prince@company.com", role: "owner", joined: "Oct 10, 2026" },
-  { id: "u2", name: "Priya Sharma", email: "priya@company.com", role: "admin", joined: "Oct 15, 2026" },
-  { id: "u3", name: "Rahul Verma", email: "rahul@company.com", role: "member", joined: "Nov 1, 2026" },
-];
-
 export default function SettingsPage() {
-  const [orgName, setOrgName] = useState("My Company");
-  const [orgSlug, setOrgSlug] = useState("my-company");
+  const { org, orgId, loading } = useOrganization();
+  const token = useAuthToken();
+
+  const [orgName, setOrgName] = useState("");
+  const [orgSlug, setOrgSlug] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [currentUser, setCurrentUser] = useState<{
+    name: string;
+    email: string;
+    role: string;
+    joined: string;
+  }>({
+    name: "User",
+    email: "",
+    role: "owner",
+    joined: "Recently",
+  });
+
+  useEffect(() => {
+    if (org) {
+      setOrgName((org.name as string) || "");
+      setOrgSlug((org.slug as string) || (org.id as string)?.slice(0, 8) || "workspace");
+    }
+  }, [org]);
+
+  useEffect(() => {
+    const supabase = createClient();
+    supabase.auth.getUser().then(({ data: { user } }) => {
+      if (user) {
+        const rawName =
+          user.user_metadata?.full_name ||
+          user.user_metadata?.name ||
+          user.email?.split("@")[0] ||
+          "User";
+        const cleanName = rawName.charAt(0).toUpperCase() + rawName.slice(1);
+        const joinedDate = user.created_at
+          ? new Date(user.created_at).toLocaleDateString("en-US", {
+              month: "short",
+              day: "numeric",
+              year: "numeric",
+            })
+          : "Recently";
+        setCurrentUser({
+          name: cleanName,
+          email: user.email || "",
+          role: "owner",
+          joined: joinedDate,
+        });
+      }
+    });
+  }, []);
+
+  async function handleSaveGeneral() {
+    if (!orgId || !token) return;
+    setSaving(true);
+    try {
+      await api(`/api/v1/organizations/${orgId}`, {
+        method: "PATCH",
+        body: JSON.stringify({ name: orgName, slug: orgSlug }),
+        token,
+      });
+      toast.success("Workspace details updated successfully");
+    } catch (err: any) {
+      toast.error(err.message || "Failed to update workspace");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  if (loading) {
+    return (
+      <div className="space-y-6">
+        <Skeleton className="h-8 w-48" />
+        <Skeleton className="h-96 w-full rounded-xl" />
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">
       <div>
         <h1 className="text-2xl font-bold tracking-tight">Workspace Settings</h1>
         <p className="text-muted-foreground text-sm mt-1">
-          Manage your organization, team, and preferences
+          Manage your organization, team, and account preferences
         </p>
       </div>
 
       <Tabs defaultValue="general">
-        <TabsList>
+        <TabsList className="bg-muted/50">
           <TabsTrigger value="general" className="gap-1.5">
             <Building2 className="h-3.5 w-3.5" />
             General
@@ -61,14 +141,17 @@ export default function SettingsPage() {
           <Card>
             <CardHeader>
               <CardTitle className="text-base">Organization Details</CardTitle>
-              <CardDescription>Update your workspace name and URL slug.</CardDescription>
+              <CardDescription>Update your workspace display name and unique identifier.</CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="flex items-center gap-4">
                 <div className="flex h-16 w-16 items-center justify-center rounded-xl bg-indigo-100 text-indigo-600 text-2xl font-bold">
-                  {orgName[0]}
+                  {orgName ? orgName.charAt(0).toUpperCase() : "W"}
                 </div>
-                <Button variant="outline" size="sm">Change Logo</Button>
+                <div>
+                  <p className="text-sm font-semibold">{orgName || "My Workspace"}</p>
+                  <p className="text-xs text-muted-foreground font-mono">Org ID: {orgId}</p>
+                </div>
               </div>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div className="space-y-2">
@@ -76,55 +159,22 @@ export default function SettingsPage() {
                   <Input value={orgName} onChange={(e) => setOrgName(e.target.value)} />
                 </div>
                 <div className="space-y-2">
-                  <Label>Slug</Label>
-                  <div className="flex">
-                    <span className="flex items-center px-3 rounded-l-[10px] border border-r-0 bg-muted text-sm text-muted-foreground">
-                      voicedesk.app/c/
-                    </span>
-                    <Input
-                      value={orgSlug}
-                      onChange={(e) => setOrgSlug(e.target.value)}
-                      className="rounded-l-none"
-                    />
-                  </div>
+                  <Label>Workspace Slug</Label>
+                  <Input
+                    value={orgSlug}
+                    onChange={(e) => setOrgSlug(e.target.value.toLowerCase().replace(/\s+/g, "-"))}
+                  />
                 </div>
               </div>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <Label>Industry</Label>
-                  <Select defaultValue="healthcare">
-                    <SelectTrigger><SelectValue /></SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="healthcare">Healthcare</SelectItem>
-                      <SelectItem value="retail">Retail</SelectItem>
-                      <SelectItem value="hospitality">Hospitality</SelectItem>
-                      <SelectItem value="professional">Professional Services</SelectItem>
-                      <SelectItem value="other">Other</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="space-y-2">
-                  <Label>Timezone</Label>
-                  <Select defaultValue="ist">
-                    <SelectTrigger><SelectValue /></SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="ist">Asia/Kolkata (IST)</SelectItem>
-                      <SelectItem value="utc">UTC</SelectItem>
-                      <SelectItem value="est">America/New_York (EST)</SelectItem>
-                      <SelectItem value="pst">America/Los_Angeles (PST)</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-              </div>
-              <Button className="gap-2" onClick={() => toast.success("Settings saved")}>
-                <Save className="h-4 w-4" />
+              <Button onClick={handleSaveGeneral} disabled={saving} className="gap-2 bg-indigo-600 hover:bg-indigo-700">
+                {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
                 Save Changes
               </Button>
             </CardContent>
           </Card>
 
           {/* Danger zone */}
-          <Card className="border-red-200">
+          <Card className="border-red-200/50 bg-red-50/10">
             <CardHeader>
               <CardTitle className="text-base text-red-600 flex items-center gap-2">
                 <AlertTriangle className="h-4 w-4" />
@@ -136,10 +186,14 @@ export default function SettingsPage() {
                 <div>
                   <p className="text-sm font-medium">Delete workspace</p>
                   <p className="text-xs text-muted-foreground">
-                    Permanently delete this workspace and all agents, documents, and data.
+                    Permanently delete this workspace and all associated agents, documents, and call records.
                   </p>
                 </div>
-                <Button variant="destructive" size="sm" onClick={() => toast.error("Contact support to delete workspace")}>
+                <Button
+                  variant="destructive"
+                  size="sm"
+                  onClick={() => toast.error("Primary workspace cannot be deleted")}
+                >
                   Delete Workspace
                 </Button>
               </div>
@@ -152,52 +206,33 @@ export default function SettingsPage() {
           <Card>
             <CardHeader className="flex flex-row items-center justify-between">
               <div>
-                <CardTitle className="text-base">Team Members</CardTitle>
-                <CardDescription>{demoMembers.length} members in your workspace</CardDescription>
+                <CardTitle className="text-base">Workspace Members</CardTitle>
+                <CardDescription>Members who have access to this VoiceDesk organization.</CardDescription>
               </div>
-              <Button size="sm" className="gap-2" onClick={() => toast.info("Invite by email coming soon")}>
-                <Plus className="h-4 w-4" />
+              <Button size="sm" variant="outline" onClick={() => toast.info("Team invites will be available in the next release.")}>
                 Invite Member
               </Button>
             </CardHeader>
             <CardContent className="space-y-3">
-              {demoMembers.map((member) => (
-                <div key={member.id} className="flex items-center gap-3 rounded-lg border p-3">
-                  <Avatar className="h-9 w-9">
-                    <AvatarFallback className="bg-indigo-50 text-indigo-600 text-sm font-semibold">
-                      {member.name.split(" ").map((n) => n[0]).join("")}
-                    </AvatarFallback>
-                  </Avatar>
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2">
-                      <p className="text-sm font-medium">{member.name}</p>
-                      <Badge
-                        variant={member.role === "owner" ? "default" : member.role === "admin" ? "info" : "secondary"}
-                        className="text-[10px]"
-                      >
-                        {member.role}
-                      </Badge>
-                    </div>
-                    <p className="text-xs text-muted-foreground">{member.email}</p>
+              <div className="flex items-center gap-3 rounded-lg border p-4 bg-muted/20">
+                <Avatar className="h-10 w-10">
+                  <AvatarFallback className="bg-indigo-100 text-indigo-700 text-sm font-semibold">
+                    {currentUser.name.slice(0, 2).toUpperCase()}
+                  </AvatarFallback>
+                </Avatar>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2">
+                    <p className="text-sm font-medium">{currentUser.name}</p>
+                    <Badge variant="success" className="text-[10px]">
+                      {currentUser.role}
+                    </Badge>
                   </div>
-                  {member.role !== "owner" && (
-                    <div className="flex items-center gap-2">
-                      <Select defaultValue={member.role}>
-                        <SelectTrigger className="h-7 text-xs w-24">
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="admin">Admin</SelectItem>
-                          <SelectItem value="member">Member</SelectItem>
-                        </SelectContent>
-                      </Select>
-                      <button className="text-muted-foreground hover:text-destructive transition-colors">
-                        <Trash2 className="h-4 w-4" />
-                      </button>
-                    </div>
-                  )}
+                  <p className="text-xs text-muted-foreground">{currentUser.email}</p>
                 </div>
-              ))}
+                <div className="text-xs text-muted-foreground">
+                  Joined {currentUser.joined}
+                </div>
+              </div>
             </CardContent>
           </Card>
         </TabsContent>
@@ -207,18 +242,15 @@ export default function SettingsPage() {
           <Card>
             <CardHeader>
               <CardTitle className="text-base">Notification Preferences</CardTitle>
-              <CardDescription>Control when and how you receive alerts.</CardDescription>
+              <CardDescription>Control alerts for call events and errors.</CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
               {[
-                { label: "Session completed", desc: "When a call ends successfully", enabled: false },
-                { label: "Session failed", desc: "When a call times out or errors", enabled: true },
-                { label: "High latency alert", desc: "When avg. latency exceeds 2 seconds", enabled: true },
-                { label: "Agent published", desc: "When a new agent version goes live", enabled: true },
-                { label: "Eval completed", desc: "When an evaluation run finishes", enabled: true },
-                { label: "Weekly summary", desc: "Weekly digest of calls and costs", enabled: false },
+                { label: "Session Completed", desc: "Send an alert when a voice call terminates successfully", enabled: false },
+                { label: "Call Failure Alert", desc: "Immediate notification if an agent call fails or drops", enabled: true },
+                { label: "Agent Published", desc: "Notification whenever a new agent version is published", enabled: true },
               ].map((item) => (
-                <div key={item.label} className="flex items-center justify-between py-2">
+                <div key={item.label} className="flex items-center justify-between py-2 border-b last:border-b-0">
                   <div>
                     <p className="text-sm font-medium">{item.label}</p>
                     <p className="text-xs text-muted-foreground">{item.desc}</p>
@@ -234,42 +266,35 @@ export default function SettingsPage() {
         <TabsContent value="security" className="mt-6 space-y-4">
           <Card>
             <CardHeader>
-              <CardTitle className="text-base">Security Settings</CardTitle>
+              <CardTitle className="text-base">Security & Authentication</CardTitle>
+              <CardDescription>Manage your authentication settings and API access.</CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="flex items-center justify-between py-2">
                 <div>
-                  <p className="text-sm font-medium">Two-factor authentication</p>
-                  <p className="text-xs text-muted-foreground">Add an extra layer of security to your account</p>
+                  <p className="text-sm font-medium">Authentication Provider</p>
+                  <p className="text-xs text-muted-foreground">Connected via Supabase Auth</p>
                 </div>
-                <Button variant="outline" size="sm">Enable 2FA</Button>
-              </div>
-              <Separator />
-              <div className="flex items-center justify-between py-2">
-                <div>
-                  <p className="text-sm font-medium">Session timeout</p>
-                  <p className="text-xs text-muted-foreground">Auto-logout after inactivity</p>
-                </div>
-                <Select defaultValue="24h">
-                  <SelectTrigger className="w-32"><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="1h">1 hour</SelectItem>
-                    <SelectItem value="8h">8 hours</SelectItem>
-                    <SelectItem value="24h">24 hours</SelectItem>
-                    <SelectItem value="7d">7 days</SelectItem>
-                  </SelectContent>
-                </Select>
+                <Badge variant="outline">Email & Password</Badge>
               </div>
               <Separator />
               <div className="space-y-2">
-                <p className="text-sm font-medium">Change Password</p>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                  <Input type="password" placeholder="Current password" />
-                  <Input type="password" placeholder="New password" />
+                <Label>Workspace ID</Label>
+                <div className="flex gap-2">
+                  <Input readOnly value={orgId || ""} className="bg-muted font-mono text-xs" />
+                  <Button
+                    variant="outline"
+                    size="icon"
+                    onClick={() => {
+                      if (orgId) {
+                        navigator.clipboard.writeText(orgId);
+                        toast.success("Workspace ID copied");
+                      }
+                    }}
+                  >
+                    <Copy className="h-4 w-4" />
+                  </Button>
                 </div>
-                <Button size="sm" variant="outline" onClick={() => toast.success("Password updated")}>
-                  Update Password
-                </Button>
               </div>
             </CardContent>
           </Card>
@@ -278,4 +303,3 @@ export default function SettingsPage() {
     </div>
   );
 }
-

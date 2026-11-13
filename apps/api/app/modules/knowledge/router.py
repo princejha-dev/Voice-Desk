@@ -39,18 +39,39 @@ async def list_knowledge_documents(
     org_id: str,
     ctx: Annotated[TenantContext, Depends(get_tenant_context)],
 ):
-    """List all knowledge documents for an organization."""
+    """List all knowledge documents for an organization with assigned agents."""
     db = get_admin_client()
     docs = (
         db.table("knowledge_documents")
-        .select("id, filename, file_path, mime_type, status, chunk_count, created_at, updated_at")
+        .select("id, filename, file_path, mime_type, status, chunk_count, file_size, created_at, updated_at")
         .eq("tenant_id", org_id)
         .order("created_at", desc=True)
         .execute()
         .data
     )
+    # Fetch agent assignments
+    try:
+        assignments = (
+            db.table("agent_knowledge_documents")
+            .select("document_id, agent_id, agents(id, name, slug)")
+            .eq("tenant_id", org_id)
+            .execute()
+            .data
+        )
+    except Exception:
+        assignments = []
+
+    doc_agents_map: dict[str, list] = {}
+    for a in assignments:
+        d_id = a.get("document_id")
+        if d_id not in doc_agents_map:
+            doc_agents_map[d_id] = []
+        if a.get("agents"):
+            doc_agents_map[d_id].append(a["agents"])
+
     for d in docs:
         d["name"] = d.get("filename")
+        d["assigned_agents"] = doc_agents_map.get(d["id"], [])
     return {"documents": docs}
 
 
@@ -285,5 +306,85 @@ async def assign_document_to_agent(
         "message": "Document assigned to agent successfully",
         "agent_id": body.agent_id,
         "document_id": doc_id,
+    }
+
+
+class UpdateDocStatusRequest(BaseModel):
+    status: str  # "ready" | "deactivated"
+
+
+@router.patch("/{org_id}/knowledge/{doc_id}/status")
+async def update_document_status(
+    org_id: str,
+    doc_id: str,
+    body: UpdateDocStatusRequest,
+    ctx: Annotated[TenantContext, Depends(get_tenant_context)],
+):
+    """Toggle document active status (ready vs deactivated). Deactivated docs are skipped during voice RAG."""
+    db = get_admin_client()
+    target_status = body.status.lower()
+    if target_status not in ("ready", "deactivated"):
+        raise HTTPException(status_code=400, detail="Status must be 'ready' or 'deactivated'")
+
+    now = datetime.now(timezone.utc).isoformat()
+    res = (
+        db.table("knowledge_documents")
+        .update({"status": target_status, "updated_at": now})
+        .eq("id", doc_id)
+        .eq("tenant_id", org_id)
+        .execute()
+        .data
+    )
+    if not res:
+        raise HTTPException(status_code=404, detail="Document not found")
+    return {"message": f"Document status updated to {target_status}", "document": res[0]}
+
+
+@router.delete("/{org_id}/knowledge/{doc_id}/assign/{agent_id}")
+async def unassign_document_from_agent(
+    org_id: str,
+    doc_id: str,
+    agent_id: str,
+    ctx: Annotated[TenantContext, Depends(get_tenant_context)],
+):
+    """Remove assignment of a knowledge document from a specific agent."""
+    db = get_admin_client()
+    db.table("agent_knowledge_documents").delete().eq("tenant_id", org_id).eq("document_id", doc_id).eq("agent_id", agent_id).execute()
+    return {"message": "Document unassigned successfully", "document_id": doc_id, "agent_id": agent_id}
+
+
+@router.get("/{org_id}/knowledge/{doc_id}/content")
+async def get_document_source_content(
+    org_id: str,
+    doc_id: str,
+    ctx: Annotated[TenantContext, Depends(get_tenant_context)],
+):
+    """Retrieve indexed text chunks for View Source modal."""
+    db = get_admin_client()
+    doc = (
+        db.table("knowledge_documents")
+        .select("id, filename, file_path, status, chunk_count, file_size")
+        .eq("id", doc_id)
+        .eq("tenant_id", org_id)
+        .maybe_single()
+        .execute()
+        .data
+    )
+    if not doc:
+        raise HTTPException(status_code=404, detail="Document not found")
+
+    chunks = (
+        db.table("knowledge_chunks")
+        .select("chunk_index, content, metadata")
+        .eq("document_id", doc_id)
+        .eq("tenant_id", org_id)
+        .order("chunk_index")
+        .limit(50)
+        .execute()
+        .data
+    )
+    return {
+        "document": doc,
+        "chunks": chunks or [],
     }
 

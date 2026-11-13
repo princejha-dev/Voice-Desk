@@ -115,7 +115,7 @@ export default function CreateAgentPage() {
   const router = useRouter();
   const { orgId } = useOrganization();
   const token = useAuthToken();
-  const { docs: availableDocs, upload: uploadDoc } = useKnowledgeDocs();
+  const { docs: availableDocs, upload: uploadDoc, refetch: refetchDocs } = useKnowledgeDocs();
   const [selectedDocIds, setSelectedDocIds] = useState<string[]>([]);
   const [step, setStep] = useState(1);
   const [template, setTemplate] = useState<string | null>(null);
@@ -132,21 +132,39 @@ export default function CreateAgentPage() {
   }
 
   async function handleUpload(newFiles: File[]) {
-    for (const f of newFiles) {
-      try {
-        await uploadDoc(f);
-        toast.success(`Uploaded ${f.name} to knowledge base`);
-      } catch (err) {
-        toast.error(`Failed to upload ${f.name}`);
-      }
-    }
-    const uploaded = newFiles.map((f) => ({
-      id: Math.random().toString(36).slice(2),
+    // 1. Immediately create pending file items with "processing" spinner
+    const pendingItems = newFiles.map((f) => ({
+      id: "pending_" + Math.random().toString(36).slice(2),
       name: f.name,
       size: f.size,
-      status: "ready" as const,
+      status: "processing" as const,
     }));
-    setFiles((prev) => [...prev, ...uploaded]);
+    setFiles((prev) => [...prev, ...pendingItems]);
+
+    // 2. Upload each file and get real document ID
+    for (let i = 0; i < newFiles.length; i++) {
+      const f = newFiles[i];
+      const pendingId = pendingItems[i].id;
+      try {
+        const res: any = await uploadDoc(f);
+        const docId = res?.document_id || pendingId;
+        // Mark as ready
+        setFiles((prev) =>
+          prev.map((item) => (item.id === pendingId ? { ...item, id: docId, status: "ready" as const } : item))
+        );
+        // Automatically check the box in selectedDocIds
+        if (docId) {
+          setSelectedDocIds((prev) => [...prev, docId]);
+        }
+        toast.success(`Uploaded & indexed ${f.name}`);
+      } catch (err: any) {
+        setFiles((prev) =>
+          prev.map((item) => (item.id === pendingId ? { ...item, status: "error" as const } : item))
+        );
+        toast.error(`Failed to upload ${f.name}: ${err?.message || "Upload error"}`);
+      }
+    }
+    refetchDocs();
   }
 
   async function handleCreate() {

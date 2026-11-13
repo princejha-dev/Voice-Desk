@@ -121,7 +121,6 @@ coverage/
 *.tmp
 *.temp
 archive/
-README.md
 docs/
 supabase/
 .env.example

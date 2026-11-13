@@ -1,7 +1,8 @@
 "use client";
 
+import { useState, useEffect } from "react";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { cn } from "@/lib/utils";
 import {
   LayoutDashboard,
@@ -22,6 +23,9 @@ import {
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
+import { createClient } from "@/lib/supabase/client";
+import { useOrganization } from "@/hooks/use-api";
+import { toast } from "sonner";
 
 interface NavItem {
   label: string;
@@ -84,6 +88,84 @@ function NavSection({ title, items }: { title: string; items: NavItem[] }) {
 }
 
 export function Sidebar() {
+  const router = useRouter();
+  const { org } = useOrganization();
+  const [userProfile, setUserProfile] = useState<{
+    name: string;
+    email: string;
+    initials: string;
+  }>({
+    name: "User",
+    email: "",
+    initials: "U",
+  });
+
+  useEffect(() => {
+    const supabase = createClient();
+    supabase.auth.getUser().then(({ data: { user } }) => {
+      if (user) {
+        const rawName =
+          user.user_metadata?.full_name ||
+          user.user_metadata?.name ||
+          user.email?.split("@")[0] ||
+          "User";
+        const cleanName =
+          rawName.charAt(0).toUpperCase() + rawName.slice(1);
+        const initials = cleanName
+          .split(" ")
+          .map((n: string) => n[0])
+          .join("")
+          .slice(0, 2)
+          .toUpperCase() || "U";
+        setUserProfile({
+          name: cleanName,
+          email: user.email || "",
+          initials,
+        });
+      }
+    });
+
+    const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => {
+      if (session?.user) {
+        const rawName =
+          session.user.user_metadata?.full_name ||
+          session.user.user_metadata?.name ||
+          session.user.email?.split("@")[0] ||
+          "User";
+        const cleanName =
+          rawName.charAt(0).toUpperCase() + rawName.slice(1);
+        const initials = cleanName
+          .split(" ")
+          .map((n: string) => n[0])
+          .join("")
+          .slice(0, 2)
+          .toUpperCase() || "U";
+        setUserProfile({
+          name: cleanName,
+          email: session.user.email || "",
+          initials,
+        });
+      }
+    });
+
+    return () => {
+      listener.subscription.unsubscribe();
+    };
+  }, []);
+
+  async function handleSignOut() {
+    try {
+      const supabase = createClient();
+      await supabase.auth.signOut();
+      toast.success("Signed out successfully");
+      router.push("/auth/login");
+    } catch {
+      router.push("/auth/login");
+    }
+  }
+
+  const workspaceName = (org?.name as string) || "My Workspace";
+
   return (
     <aside className="fixed inset-y-0 left-0 z-40 flex w-[260px] flex-col bg-sidebar border-r border-sidebar-border">
       {/* Logo */}
@@ -97,9 +179,9 @@ export function Sidebar() {
       {/* Workspace Switcher */}
       <div className="px-3 mb-5">
         <button className="flex w-full items-center gap-2.5 rounded-lg border border-sidebar-border bg-sidebar-accent/50 px-3 py-2 text-sm text-sidebar-foreground hover:bg-sidebar-accent transition-colors">
-          <Building2 className="h-4 w-4 text-sidebar-muted" />
-          <span className="flex-1 text-left truncate">My Workspace</span>
-          <ChevronDown className="h-3.5 w-3.5 text-sidebar-muted" />
+          <Building2 className="h-4 w-4 text-sidebar-muted shrink-0" />
+          <span className="flex-1 text-left truncate font-medium">{workspaceName}</span>
+          <ChevronDown className="h-3.5 w-3.5 text-sidebar-muted shrink-0" />
         </button>
       </div>
 
@@ -122,22 +204,29 @@ export function Sidebar() {
 
       <Separator className="bg-sidebar-border" />
 
-      {/* User */}
+      {/* Dynamic Logged-in User */}
       <div className="flex items-center gap-3 px-4 py-3">
         <Avatar className="h-8 w-8">
-          <AvatarFallback className="bg-sidebar-accent text-sidebar-foreground text-xs">
-            PJ
+          <AvatarFallback className="bg-sidebar-accent text-sidebar-foreground text-xs font-semibold">
+            {userProfile.initials}
           </AvatarFallback>
         </Avatar>
         <div className="flex-1 min-w-0">
-          <p className="text-sm font-medium text-sidebar-foreground truncate">Prince Jha</p>
-          <p className="text-xs text-sidebar-muted truncate">owner</p>
+          <p className="text-sm font-medium text-sidebar-foreground truncate" title={userProfile.name}>
+            {userProfile.name}
+          </p>
+          <p className="text-xs text-sidebar-muted truncate" title={userProfile.email}>
+            {userProfile.email || "Workspace Member"}
+          </p>
         </div>
-        <button className="text-sidebar-muted hover:text-sidebar-foreground transition-colors">
+        <button
+          onClick={handleSignOut}
+          title="Sign out"
+          className="text-sidebar-muted hover:text-red-400 transition-colors p-1 rounded-md"
+        >
           <LogOut className="h-4 w-4" />
         </button>
       </div>
     </aside>
   );
 }
-
