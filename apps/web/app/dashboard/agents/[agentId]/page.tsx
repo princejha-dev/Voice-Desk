@@ -44,7 +44,7 @@ export default function AgentDetailPage({ params }: { params: Promise<{ agentId:
   const { orgId } = useOrganization();
   const [tab, setTab] = useState("config");
 
-  const { agent, loading: agentLoading, refetch: refetchAgent } = useAgent(agentId);
+  const { agent, loading: agentLoading, refetch: refetchAgent, updateAgent } = useAgent(agentId);
   const { versions, loading: versionsLoading, refetch: refetchVersions, saveVersion, publishVersion } = useAgentVersions(agentId);
   const { docs, loading: docsLoading, upload: uploadDoc } = useKnowledgeDocs();
 
@@ -133,8 +133,15 @@ export default function AgentDetailPage({ params }: { params: Promise<{ agentId:
     if (!orgId || !token || !agentId) return;
     api<{ documents?: Record<string, unknown>[] }>(`/api/v1/organizations/${orgId}/knowledge`, { token })
       .then((res) => {
-        // Find which docs are assigned to this agent
-        // If agent.settings or config has knowledge_base_ids, use them
+        const assigned = (res.documents || [])
+          .filter((doc: any) =>
+            doc.assigned_agents?.some((a: any) => a.id === agentId) ||
+            doc.agent_id === agentId
+          )
+          .map((doc: any) => doc.id as string);
+        if (assigned.length > 0) {
+          setAssignedDocIds((prev) => Array.from(new Set([...prev, ...assigned])));
+        }
       })
       .catch(console.error);
   }, [orgId, token, agentId]);
@@ -147,6 +154,11 @@ export default function AgentDetailPage({ params }: { params: Promise<{ agentId:
   async function handleSaveDraft() {
     setSaving(true);
     try {
+      // 1. Update basic agent details (Name, description)
+      if (updateAgent) {
+        await updateAgent({ name, description });
+      }
+
       const config = {
         greeting,
         instructions,
@@ -178,8 +190,21 @@ export default function AgentDetailPage({ params }: { params: Promise<{ agentId:
         guardrails: { refuse_off_topic: true, require_knowledge_base: true, offer_human_fallback: true },
       };
 
+      // 2. Save immutable version config snapshot
       await saveVersion(config);
-      toast.success("Draft version saved successfully!");
+
+      // 3. Sync document assignments
+      if (orgId && token && assignedDocIds.length > 0) {
+        for (const docId of assignedDocIds) {
+          await api(`/api/v1/organizations/${orgId}/knowledge/${docId}/assign`, {
+            method: "POST",
+            body: JSON.stringify({ agent_id: agentId }),
+            token,
+          }).catch(console.error);
+        }
+      }
+
+      toast.success("Draft version and agent details saved successfully!");
       refetchVersions();
       refetchAgent();
     } catch (err: any) {
@@ -192,6 +217,11 @@ export default function AgentDetailPage({ params }: { params: Promise<{ agentId:
   async function handlePublish() {
     setPublishing(true);
     try {
+      // 1. Update basic agent details (Name, description)
+      if (updateAgent) {
+        await updateAgent({ name, description });
+      }
+
       const config = {
         greeting,
         instructions,
@@ -223,14 +253,14 @@ export default function AgentDetailPage({ params }: { params: Promise<{ agentId:
         guardrails: { refuse_off_topic: true, require_knowledge_base: true, offer_human_fallback: true },
       };
 
-      // 1. Save new version
+      // 2. Save new version
       const ver: any = await saveVersion(config);
       const versionId = ver.id;
 
-      // 2. Publish this version
+      // 3. Publish this version
       await publishVersion(versionId);
 
-      // 3. Assign knowledge documents
+      // 4. Assign knowledge documents
       if (orgId && token && assignedDocIds.length > 0) {
         for (const docId of assignedDocIds) {
           await api(`/api/v1/organizations/${orgId}/knowledge/${docId}/assign`, {

@@ -388,3 +388,52 @@ async def get_document_source_content(
         "chunks": chunks or [],
     }
 
+
+@router.get("/{org_id}/knowledge/{doc_id}/download-url")
+async def get_document_download_url(
+    org_id: str,
+    doc_id: str,
+    ctx: Annotated[TenantContext, Depends(get_tenant_context)],
+):
+    """Generate a signed download/view URL from Supabase Storage for View Source."""
+    db = get_admin_client()
+    doc = (
+        db.table("knowledge_documents")
+        .select("id, filename, file_path")
+        .eq("id", doc_id)
+        .eq("tenant_id", org_id)
+        .maybe_single()
+        .execute()
+        .data
+    )
+    if not doc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document not found")
+
+    file_path = doc.get("file_path")
+    if not file_path:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File path not found for document")
+
+    try:
+        # Generate signed URL valid for 3600 seconds (1 hour)
+        signed_res = db.storage.from_(STORAGE_BUCKET).create_signed_url(file_path, 3600)
+        signed_url = None
+        if isinstance(signed_res, dict):
+            signed_url = signed_res.get("signedURL") or signed_res.get("signedUrl")
+        elif hasattr(signed_res, "get"):
+            signed_url = signed_res.get("signedURL") or signed_res.get("signedUrl")
+        else:
+            signed_url = str(signed_res)
+
+        if not signed_url:
+            raise HTTPException(status_code=500, detail="Could not obtain signed URL")
+
+        return {"download_url": signed_url, "filename": doc.get("filename")}
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to generate signed URL: {exc}",
+        ) from exc
+
+

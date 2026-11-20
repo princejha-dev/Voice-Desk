@@ -150,7 +150,18 @@ export function useAgent(agentId: string | undefined) {
 
   useEffect(() => { refetch(); }, [refetch]);
 
-  return { agent, loading, refetch };
+  const updateAgent = useCallback(
+    async (payload: { name?: string; description?: string; slug?: string }) => {
+      if (!orgId || !token || !agentId) throw new Error("Not authenticated");
+      return api<Record<string, unknown>>(
+        `/api/v1/organizations/${orgId}/agents/${agentId}`,
+        { method: "PATCH", body: JSON.stringify(payload), token }
+      );
+    },
+    [orgId, token, agentId]
+  );
+
+  return { agent, loading, refetch, updateAgent };
 }
 
 export function useAgentVersions(agentId: string | undefined) {
@@ -361,6 +372,17 @@ export function useKnowledgeDocs() {
     [orgId, token]
   );
 
+  const getDownloadUrl = useCallback(
+    async (docId: string) => {
+      if (!orgId || !token) return null;
+      return api<{ download_url: string; filename: string }>(
+        `/api/v1/organizations/${orgId}/knowledge/${docId}/download-url`,
+        { token }
+      );
+    },
+    [orgId, token]
+  );
+
   return {
     docs,
     loading,
@@ -371,6 +393,7 @@ export function useKnowledgeDocs() {
     assignAgent,
     unassignAgent,
     getSourceContent,
+    getDownloadUrl,
   };
 }
 

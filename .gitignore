@@ -122,7 +122,8 @@ coverage/
 *.temp
 archive/
 docs/
-
+supabase/
 .env.example
 agent/
+md/
 

@@ -53,6 +53,8 @@ export default function KnowledgePage() {
   } | null>(null);
   const [sourceLoading, setSourceLoading] = useState(false);
 
+  const [openingDocId, setOpeningDocId] = useState<string | null>(null);
+
   // Manage agents modal state
   const [managingDoc, setManagingDoc] = useState<any | null>(null);
 
@@ -66,6 +68,7 @@ export default function KnowledgePage() {
     assignAgent,
     unassignAgent,
     getSourceContent,
+    getDownloadUrl,
   } = useKnowledgeDocs();
 
   const { agents } = useAgents();
@@ -137,16 +140,20 @@ export default function KnowledgePage() {
     }
   }
 
-  async function handleViewSource(docId: string) {
-    setViewingDocId(docId);
-    setSourceLoading(true);
+  async function handleViewSource(doc: any) {
+    setOpeningDocId(doc.id);
     try {
-      const data = await getSourceContent(docId);
-      setSourceData(data);
+      const res = await getDownloadUrl(doc.id);
+      if (res?.download_url) {
+        window.open(res.download_url, "_blank");
+        toast.success(`Opening "${doc.filename}" source document`);
+      } else {
+        toast.error("Could not generate source document link");
+      }
     } catch (err: any) {
-      toast.error("Failed to load source content");
+      toast.error(err.message || "Failed to load source document");
     } finally {
-      setSourceLoading(false);
+      setOpeningDocId(null);
     }
   }
 
@@ -414,10 +421,15 @@ export default function KnowledgePage() {
                               variant="outline"
                               size="sm"
                               className="h-8 text-xs gap-1.5"
-                              onClick={() => handleViewSource(doc.id)}
-                              disabled={isProcessing}
+                              onClick={() => handleViewSource(doc)}
+                              disabled={isProcessing || openingDocId === doc.id}
+                              title="Open original uploaded file from storage in new tab"
                             >
-                              <Eye className="h-3.5 w-3.5" />
+                              {openingDocId === doc.id ? (
+                                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                              ) : (
+                                <ExternalLink className="h-3.5 w-3.5 text-indigo-500" />
+                              )}
                               View Source
                             </Button>
                             <Button

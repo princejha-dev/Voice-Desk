@@ -5,10 +5,10 @@ from __future__ import annotations
 import json
 import uuid
 from datetime import datetime, timezone
-from typing import Annotated
+from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Path, status
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict, Field
 
 from app.dependencies import TenantContext, get_tenant_context, get_current_user
 from app.services.supabase import get_admin_client
@@ -44,6 +44,8 @@ class GuardrailConfig(BaseModel):
 
 
 class AgentConfigSchema(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
     instructions: str = ""
     greeting: str = ""
     personality: str = ""
@@ -51,6 +53,8 @@ class AgentConfigSchema(BaseModel):
     stt: STTConfig = STTConfig()
     tts: TTSConfig = TTSConfig()
     tools: list[str] = ["knowledge_search", "request_callback"]
+    tools_config: dict[str, Any] = Field(default_factory=dict)
+    custom_tools: list[dict[str, Any]] = Field(default_factory=list)
     guardrails: GuardrailConfig = GuardrailConfig()
     knowledge_base_ids: list[str] = []
 
@@ -64,6 +68,7 @@ class CreateAgentRequest(BaseModel):
 class UpdateAgentRequest(BaseModel):
     name: str | None = None
     description: str | None = None
+    slug: str | None = None
 
 
 class SaveVersionRequest(BaseModel):

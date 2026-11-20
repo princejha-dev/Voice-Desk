@@ -69,8 +69,10 @@ class DynamicVoiceAgent:
         # Knowledge search rules
         if "knowledge_search" in enabled_tools_list:
             tool_rules.append(
-                "- KNOWLEDGE BASE: Use the knowledge_search tool when asked about company policies, products, or specifics. "
-                "Never invent facts not found in the search results."
+                "- KNOWLEDGE BASE: You have access to the company's uploaded documents and knowledge base via the knowledge_search tool. "
+                "Whenever the caller asks any question about products, services, company data, documentation, pricing, or procedures, "
+                "you MUST immediately call knowledge_search to retrieve accurate information before answering. "
+                "Answer concisely based on the retrieved information and never invent facts."
             )
 
         # Support ticket rules
