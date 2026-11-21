@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, use } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -40,9 +40,17 @@ import { toast } from "sonner";
 export default function AgentDetailPage({ params }: { params: Promise<{ agentId: string }> }) {
   const { agentId } = use(params);
   const router = useRouter();
+  const searchParams = useSearchParams();
   const token = useAuthToken();
   const { orgId } = useOrganization();
-  const [tab, setTab] = useState("config");
+  const [tab, setTab] = useState(searchParams.get("tab") || "config");
+
+  useEffect(() => {
+    const requestedTab = searchParams.get("tab");
+    if (requestedTab) {
+      setTab(requestedTab);
+    }
+  }, [searchParams]);
 
   const { agent, loading: agentLoading, refetch: refetchAgent, updateAgent } = useAgent(agentId);
   const { versions, loading: versionsLoading, refetch: refetchVersions, saveVersion, publishVersion } = useAgentVersions(agentId);
@@ -196,14 +204,28 @@ export default function AgentDetailPage({ params }: { params: Promise<{ agentId:
       // 2. Save immutable version config snapshot
       await saveVersion(config);
 
-      // 3. Sync document assignments
-      if (orgId && token && assignedDocIds.length > 0) {
+      // 3. Sync document assignments in database
+      if (orgId && token) {
         for (const docId of assignedDocIds) {
           await api(`/api/v1/organizations/${orgId}/knowledge/${docId}/assign`, {
             method: "POST",
             body: JSON.stringify({ agent_id: agentId }),
             token,
           }).catch(console.error);
+        }
+        const previouslyAssigned = (docs || [])
+          .filter((doc: any) =>
+            doc.assigned_agents?.some((a: any) => a.id === agentId) ||
+            doc.agent_id === agentId
+          )
+          .map((doc: any) => doc.id as string);
+        for (const prevDocId of previouslyAssigned) {
+          if (!assignedDocIds.includes(prevDocId)) {
+            await api(`/api/v1/organizations/${orgId}/knowledge/${prevDocId}/assign/${agentId}`, {
+              method: "DELETE",
+              token,
+            }).catch(console.error);
+          }
         }
       }
 
@@ -263,14 +285,28 @@ export default function AgentDetailPage({ params }: { params: Promise<{ agentId:
       // 3. Publish this version
       await publishVersion(versionId);
 
-      // 4. Assign knowledge documents
-      if (orgId && token && assignedDocIds.length > 0) {
+      // 4. Sync document assignments in database
+      if (orgId && token) {
         for (const docId of assignedDocIds) {
           await api(`/api/v1/organizations/${orgId}/knowledge/${docId}/assign`, {
             method: "POST",
             body: JSON.stringify({ agent_id: agentId }),
             token,
           }).catch(console.error);
+        }
+        const previouslyAssigned = (docs || [])
+          .filter((doc: any) =>
+            doc.assigned_agents?.some((a: any) => a.id === agentId) ||
+            doc.agent_id === agentId
+          )
+          .map((doc: any) => doc.id as string);
+        for (const prevDocId of previouslyAssigned) {
+          if (!assignedDocIds.includes(prevDocId)) {
+            await api(`/api/v1/organizations/${orgId}/knowledge/${prevDocId}/assign/${agentId}`, {
+              method: "DELETE",
+              token,
+            }).catch(console.error);
+          }
         }
       }
 
@@ -600,6 +636,9 @@ export default function AgentDetailPage({ params }: { params: Promise<{ agentId:
                           <div className="text-sm font-medium flex items-center gap-2">
                             <span>Version {v.version}</span>
                             {isActive && <Badge variant="success" className="text-[10px]">Active</Badge>}
+                            <Badge variant="outline" className="text-[10px] text-muted-foreground font-normal">
+                              {Array.isArray(v.config?.knowledge_base_ids) ? v.config.knowledge_base_ids.length : 0} docs attached
+                            </Badge>
                           </div>
                           <div className="text-xs text-muted-foreground mt-0.5 flex items-center gap-1.5">
                             <Clock className="h-3 w-3" />

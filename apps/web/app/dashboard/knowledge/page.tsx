@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useCallback, useEffect } from "react";
+import Link from "next/link";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -17,7 +18,6 @@ import {
   Eye,
   Power,
   PowerOff,
-  UserCheck,
   ChevronDown,
   X,
   Loader2,
@@ -55,9 +55,6 @@ export default function KnowledgePage() {
 
   const [openingDocId, setOpeningDocId] = useState<string | null>(null);
 
-  // Manage agents modal state
-  const [managingDoc, setManagingDoc] = useState<any | null>(null);
-
   const {
     docs: rawDocs,
     loading,
@@ -65,8 +62,6 @@ export default function KnowledgePage() {
     upload,
     deleteDoc,
     updateStatus,
-    assignAgent,
-    unassignAgent,
     getSourceContent,
     getDownloadUrl,
   } = useKnowledgeDocs();
@@ -168,28 +163,6 @@ export default function KnowledgePage() {
     }
   }
 
-  async function handleToggleAgentAssignment(docId: string, agentId: string, isCurrentlyAssigned: boolean) {
-    try {
-      if (isCurrentlyAssigned) {
-        await unassignAgent(docId, agentId);
-        toast.info("Unassigned document from agent");
-      } else {
-        await assignAgent(docId, agentId);
-        toast.success("Assigned document to agent");
-      }
-      refetch();
-      // Update managingDoc state locally so UI updates immediately
-      if (managingDoc && managingDoc.id === docId) {
-        const updatedAgents = isCurrentlyAssigned
-          ? managingDoc.assignedAgents.filter((a: any) => a.id !== agentId)
-          : [...managingDoc.assignedAgents, agents.find((a: any) => a.id === agentId)];
-        setManagingDoc({ ...managingDoc, assignedAgents: updatedAgents });
-      }
-    } catch (err: any) {
-      toast.error(err.message || "Failed to update assignment");
-    }
-  }
-
   return (
     <div className="space-y-6">
       {/* Header */}
@@ -197,7 +170,7 @@ export default function KnowledgePage() {
         <div>
           <h1 className="text-2xl font-bold tracking-tight">Knowledge Base</h1>
           <p className="text-muted-foreground text-sm mt-1">
-            Manage company documents, activate/deactivate RAG scope, and view indexed vector source chunks.
+            Central repository of company documents. To attach documents to an agent, select them inside the Agent Studio and publish an agent release.
           </p>
         </div>
         <div className="flex items-center gap-3">
@@ -308,7 +281,7 @@ export default function KnowledgePage() {
               <TableHeader>
                 <TableRow className="bg-muted/30">
                   <TableHead>Document Name</TableHead>
-                  <TableHead>Assigned Agents</TableHead>
+                  <TableHead>In Use By Agents</TableHead>
                   <TableHead>Chunks</TableHead>
                   <TableHead>Status / RAG State</TableHead>
                   <TableHead>Uploaded</TableHead>
@@ -340,30 +313,29 @@ export default function KnowledgePage() {
                           </div>
                         </TableCell>
 
-                        {/* Assigned Agents */}
+                        {/* In Use By Agents */}
                         <TableCell>
                           <div className="flex flex-wrap items-center gap-1.5 max-w-xs">
                             {doc.assignedAgents.length === 0 ? (
-                              <button
-                                onClick={() => setManagingDoc(doc)}
-                                className="text-xs text-muted-foreground hover:text-indigo-600 border border-dashed px-2 py-0.5 rounded-md"
-                              >
-                                + Assign Agent
-                              </button>
+                              <Badge variant="outline" className="text-[11px] font-normal text-muted-foreground border-dashed">
+                                Not in use
+                              </Badge>
                             ) : (
-                              <>
-                                {doc.assignedAgents.map((ag: any) => (
-                                  <Badge key={ag.id} variant="secondary" className="text-[11px] font-normal py-0">
+                              doc.assignedAgents.map((ag: any) => (
+                                <Link
+                                  key={ag.id}
+                                  href={`/dashboard/agents/${ag.id}?tab=knowledge`}
+                                  title={`Open ${ag.name} studio to manage attached knowledge`}
+                                >
+                                  <Badge
+                                    variant="secondary"
+                                    className="text-[11px] font-normal py-0 hover:bg-indigo-100 hover:text-indigo-700 transition-colors cursor-pointer flex items-center gap-1"
+                                  >
+                                    <Bot className="h-3 w-3" />
                                     {ag.name}
                                   </Badge>
-                                ))}
-                                <button
-                                  onClick={() => setManagingDoc(doc)}
-                                  className="text-[11px] text-muted-foreground hover:text-foreground font-medium ml-1"
-                                >
-                                  Edit
-                                </button>
-                              </>
+                                </Link>
+                              ))
                             )}
                           </div>
                         </TableCell>
@@ -527,72 +499,6 @@ export default function KnowledgePage() {
                 }}
               >
                 Close
-              </Button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* ── MANAGE AGENTS MODAL ───────────────────────────────────────────────── */}
-      {managingDoc && (
-        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-card border rounded-2xl w-full max-w-md shadow-2xl overflow-hidden">
-            <div className="flex items-center justify-between px-6 py-4 border-b">
-              <div>
-                <h3 className="font-semibold text-base flex items-center gap-2">
-                  <UserCheck className="h-4 w-4 text-indigo-500" />
-                  Assign Agents to Document
-                </h3>
-                <p className="text-xs text-muted-foreground truncate max-w-xs font-mono">
-                  {managingDoc.filename}
-                </p>
-              </div>
-              <Button variant="ghost" size="icon" onClick={() => setManagingDoc(null)}>
-                <X className="h-4 w-4" />
-              </Button>
-            </div>
-
-            <div className="p-6 space-y-3 max-h-96 overflow-y-auto">
-              <p className="text-xs text-muted-foreground mb-3">
-                Selected voice agents will query this document during calls when answering customer questions:
-              </p>
-
-              {agents.length === 0 ? (
-                <p className="text-xs text-muted-foreground text-center py-6">
-                  No agents found. Create an agent first to assign knowledge.
-                </p>
-              ) : (
-                agents.map((ag: any) => {
-                  const isAssigned = managingDoc.assignedAgents.some((a: any) => a.id === ag.id);
-                  return (
-                    <div
-                      key={ag.id}
-                      onClick={() => handleToggleAgentAssignment(managingDoc.id, ag.id, isAssigned)}
-                      className={`flex items-center justify-between p-3 rounded-xl border cursor-pointer transition-all ${
-                        isAssigned ? "border-indigo-500 bg-indigo-500/5 ring-1 ring-indigo-500" : "hover:border-border/80"
-                      }`}
-                    >
-                      <div className="flex items-center gap-3">
-                        <div className={`flex h-8 w-8 items-center justify-center rounded-lg ${isAssigned ? "bg-indigo-600 text-white" : "bg-muted text-muted-foreground"}`}>
-                          <Bot className="h-4 w-4" />
-                        </div>
-                        <div>
-                          <p className="text-sm font-medium">{ag.name}</p>
-                          <p className="text-xs text-muted-foreground font-mono">/c/{ag.slug}</p>
-                        </div>
-                      </div>
-                      <Badge variant={isAssigned ? "success" : "secondary"} className="text-xs">
-                        {isAssigned ? "Assigned" : "Unassigned"}
-                      </Badge>
-                    </div>
-                  );
-                })
-              )}
-            </div>
-
-            <div className="px-6 py-3 border-t bg-muted/20 flex justify-end">
-              <Button size="sm" onClick={() => setManagingDoc(null)} className="bg-indigo-600 hover:bg-indigo-700">
-                Done
               </Button>
             </div>
           </div>

@@ -14,6 +14,39 @@ import {
 import { useBookings, useTickets, useCallbacks } from "@/hooks/use-api";
 import { toast } from "sonner";
 
+function formatDateTime(dateStr?: string) {
+  if (!dateStr) return "—";
+  try {
+    const d = new Date(dateStr);
+    if (isNaN(d.getTime())) return dateStr;
+    return d.toLocaleString("en-US", {
+      month: "short",
+      day: "numeric",
+      year: "numeric",
+      hour: "numeric",
+      minute: "2-digit",
+      hour12: true,
+    });
+  } catch {
+    return dateStr;
+  }
+}
+
+function timeAgo(dateStr?: string) {
+  if (!dateStr) return "";
+  try {
+    const d = new Date(dateStr);
+    const now = new Date();
+    const diffSec = Math.floor((now.getTime() - d.getTime()) / 1000);
+    if (diffSec < 60) return "Just now";
+    if (diffSec < 3600) return `${Math.floor(diffSec / 60)}m ago`;
+    if (diffSec < 86400) return `${Math.floor(diffSec / 3600)}h ago`;
+    return `${Math.floor(diffSec / 86400)}d ago`;
+  } catch {
+    return "";
+  }
+}
+
 export default function ToolsHubPage() {
   const [activeTab, setActiveTab] = useState("bookings");
 
@@ -310,7 +343,8 @@ export default function ToolsHubPage() {
                   <Table>
                     <TableHeader>
                       <TableRow>
-                        <TableHead>Phone Number</TableHead>
+                        <TableHead>Customer</TableHead>
+                        <TableHead>Date & Time</TableHead>
                         <TableHead>Reason / Notes</TableHead>
                         <TableHead>Agent</TableHead>
                         <TableHead>Status</TableHead>
@@ -322,8 +356,22 @@ export default function ToolsHubPage() {
                         const status = (c.status as string) || "pending";
                         return (
                           <TableRow key={c.id as string}>
-                            <TableCell className="font-mono text-sm font-semibold">
-                              {c.customer_phone as string}
+                            <TableCell className="font-medium">
+                              <div>{(c.customer_name as string) || "Customer"}</div>
+                              <div className="text-xs font-mono text-muted-foreground">
+                                {(c.customer_phone as string) || "—"}
+                              </div>
+                            </TableCell>
+                            <TableCell>
+                              <div className="flex items-center gap-1.5 text-sm">
+                                <Clock className="h-3.5 w-3.5 text-muted-foreground" />
+                                {formatDateTime(c.created_at as string)}
+                              </div>
+                              {timeAgo(c.created_at as string) && (
+                                <div className="text-xs text-muted-foreground">
+                                  {timeAgo(c.created_at as string)}
+                                </div>
+                              )}
                             </TableCell>
                             <TableCell className="text-sm">
                               {(c.reason as string) || "Customer requested callback"}
