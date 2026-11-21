@@ -168,6 +168,27 @@ async def list_agents(
         .execute()
         .data
     )
+
+    # Compute call counts from call_sessions
+    try:
+        sessions_res = (
+            db.table("call_sessions")
+            .select("agent_id")
+            .eq("tenant_id", org_id)
+            .execute()
+            .data
+        )
+        counts: dict[str, int] = {}
+        for s in (sessions_res or []):
+            aid = s.get("agent_id")
+            if aid:
+                counts[aid] = counts.get(aid, 0) + 1
+        for a in agents:
+            a["call_count"] = counts.get(a["id"], 0)
+    except Exception:
+        for a in agents:
+            a["call_count"] = 0
+
     return {"agents": agents}
 
 
@@ -189,6 +210,19 @@ async def get_agent(
     )
     if not agent:
         raise HTTPException(status_code=404, detail="Agent not found")
+
+    try:
+        call_count_res = (
+            db.table("call_sessions")
+            .select("id", count="exact")
+            .eq("agent_id", agent_id)
+            .eq("tenant_id", org_id)
+            .execute()
+        )
+        agent["call_count"] = call_count_res.count or 0
+    except Exception:
+        agent["call_count"] = 0
+
     return agent
 
 

@@ -123,28 +123,31 @@ export default function AgentDetailPage({ params }: { params: Promise<{ agentId:
       custom_tools: Array.isArray(cfg.custom_tools) ? cfg.custom_tools : [],
     });
 
-    if (Array.isArray(cfg.knowledge_base_ids)) {
-      setAssignedDocIds(cfg.knowledge_base_ids);
+    // Sync document assignments when agent loads
+    if (Array.isArray(cfg.knowledge_base_ids) && cfg.knowledge_base_ids.length > 0) {
+      setAssignedDocIds((prev) => Array.from(new Set([...prev, ...cfg.knowledge_base_ids])));
     }
   }, [agent]);
 
-  // Load document assignments for this agent
+  // Load document assignments for this agent from both documents list and database
   useEffect(() => {
-    if (!orgId || !token || !agentId) return;
-    api<{ documents?: Record<string, unknown>[] }>(`/api/v1/organizations/${orgId}/knowledge`, { token })
-      .then((res) => {
-        const assigned = (res.documents || [])
-          .filter((doc: any) =>
-            doc.assigned_agents?.some((a: any) => a.id === agentId) ||
-            doc.agent_id === agentId
-          )
-          .map((doc: any) => doc.id as string);
-        if (assigned.length > 0) {
-          setAssignedDocIds((prev) => Array.from(new Set([...prev, ...assigned])));
-        }
-      })
-      .catch(console.error);
-  }, [orgId, token, agentId]);
+    if (!agentId) return;
+    const activeVer = (agent?.agent_versions as Record<string, unknown>) || {};
+    const cfg = (activeVer.config as Record<string, any>) || {};
+    const cfgIds: string[] = Array.isArray(cfg.knowledge_base_ids) ? cfg.knowledge_base_ids : [];
+
+    const assignedFromDocs = (docs || [])
+      .filter((doc: any) =>
+        doc.assigned_agents?.some((a: any) => a.id === agentId) ||
+        doc.agent_id === agentId
+      )
+      .map((doc: any) => doc.id as string);
+
+    const merged = Array.from(new Set([...assignedFromDocs, ...cfgIds]));
+    if (merged.length > 0) {
+      setAssignedDocIds((prev) => Array.from(new Set([...prev, ...merged])));
+    }
+  }, [docs, agent, agentId]);
 
   const activeVersionNumber = String((agent?.agent_versions as Record<string, any>)?.version ?? versions[0]?.version ?? 1);
   const isPublished = agent?.status === "published";

@@ -43,12 +43,16 @@ async def list_knowledge_documents(
     db = get_admin_client()
     docs = (
         db.table("knowledge_documents")
-        .select("id, filename, file_path, mime_type, status, chunk_count, file_size, created_at, updated_at")
+        .select("id, filename, file_path, mime_type, status, chunk_count, file_size, created_at, updated_at, agent_id")
         .eq("tenant_id", org_id)
         .order("created_at", desc=True)
         .execute()
         .data
     )
+    # Fetch agents dictionary for reliable lookup
+    all_agents_res = db.table("agents").select("id, name, slug").eq("tenant_id", org_id).execute().data or []
+    agent_names = {ag["id"]: ag for ag in all_agents_res}
+
     # Fetch agent assignments
     try:
         assignments = (
@@ -64,14 +68,26 @@ async def list_knowledge_documents(
     doc_agents_map: dict[str, list] = {}
     for a in assignments:
         d_id = a.get("document_id")
+        if not d_id:
+            continue
         if d_id not in doc_agents_map:
             doc_agents_map[d_id] = []
-        if a.get("agents"):
-            doc_agents_map[d_id].append(a["agents"])
+        ag_data = a.get("agents")
+        if not ag_data and a.get("agent_id") in agent_names:
+            ag_data = agent_names[a["agent_id"]]
+        elif not ag_data and a.get("agent_id"):
+            ag_data = {"id": a["agent_id"], "name": "Assigned Agent"}
+        if ag_data and not any(existing.get("id") == ag_data.get("id") for existing in doc_agents_map[d_id]):
+            doc_agents_map[d_id].append(ag_data)
 
     for d in docs:
         d["name"] = d.get("filename")
-        d["assigned_agents"] = doc_agents_map.get(d["id"], [])
+        assigned = list(doc_agents_map.get(d["id"], []))
+        owner_id = d.get("agent_id")
+        if owner_id and not any(ag.get("id") == owner_id for ag in assigned):
+            owner_info = agent_names.get(owner_id, {"id": owner_id, "name": "Agent"})
+            assigned.append(owner_info)
+        d["assigned_agents"] = assigned
     return {"documents": docs}
 
 

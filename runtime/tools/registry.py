@@ -81,17 +81,20 @@ def _build_ticket_tool(session_ctx: SessionContext):
 def _build_callback_tool(session_ctx: SessionContext):
     async def request_callback_tool(
         phone_number: str,
-        reason: str = "",
+        reason: str = "Customer requested human callback",
+        customer_name: str = "",
     ) -> str:
         """Request a human representative to call the customer back.
 
         Args:
             phone_number: The phone number to call back.
             reason: Optional reason or topic for the callback.
+            customer_name: Optional customer name if provided.
         """
         return await request_callback(
             phone_number=phone_number,
             reason=reason,
+            customer_name=customer_name,
             session_ctx=session_ctx,
         )
     return llm.function_tool(request_callback_tool)
