@@ -2,7 +2,7 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
-# Install system dependencies (audio libs for LiveKit agent)
+# Install system dependencies (audio processing & build tools for LiveKit agent)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     libsndfile1 \
@@ -11,15 +11,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Python dependencies
-COPY requirements.txt .
+COPY runtime/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy runtime code
-COPY . .
+# Copy runtime code as package
+COPY runtime/ ./runtime
 
-# Create non-root user
-RUN useradd -m -u 1001 appuser && chown -R appuser:appuser /app
-USER appuser
+ENV PYTHONPATH=/app
 
-# LiveKit agent worker — entrypoint uses livekit-agents worker mode
-CMD ["python", "main.py", "start"]
+# Run LiveKit agent worker in production start mode
+CMD ["python", "runtime/entrypoint.py", "start"]
